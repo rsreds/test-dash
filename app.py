@@ -4,7 +4,7 @@ import pandas as pd
 from dash import Dash, html, dcc, Input, Output, State
 
 app = Dash(__name__)
-app.title = "Simple CSV Viewer"
+app.title = "Simple CSV Printer"
 
 app.layout = html.Div([
     html.H2("Upload CSV File"),
