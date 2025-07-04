@@ -1,174 +1,139 @@
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from dash import Dash, html, dcc, Input, Output, State, ctx
+import dash_table
 import pandas as pd
-from dash import Dash, html, dcc, Input, Output, callback
-import dash_bootstrap_components as dbc
+import os
 
+app = Dash(__name__)
 
-app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
-app.title = "Multi-Objective Optimization Visualization"
+BASE_DIR = "/eos/"
 
-#  data generation
-num_objectives = 3
-target_point_id = 657
-np.random.seed(42)
-n_points = 2000
+app.layout = html.Div([
+    html.H1("EOS Browser & CSV Uploader"),
 
-def find_pareto_front(points):
-    """Find Pareto optimal points"""
-    n_points = points.shape[0]
-    pareto_mask = np.ones(n_points, dtype=bool)
-    
-    for i in range(n_points):
-        for j in range(n_points):
-            if i != j:
-                if np.all(points[j] <= points[i]) and np.any(points[j] < points[i]):
-                    pareto_mask[i] = False
-                    break
-    return pareto_mask
+    html.Div([
+        html.H2("📁 Browse EOS"),
+        html.P(f"Base directory: {BASE_DIR}"),
+        dcc.Dropdown(id="folder-dropdown", placeholder="Select a folder"),
+        html.Button("Go", id="go-button"),
+        html.Div(id="eos-file-list"),
+    ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
 
-decision_vars = np.random.uniform(0, 1, (n_points, num_objectives))
-objectives = []
-for i in range(num_objectives):
-    target_point = np.zeros(num_objectives)
-    target_point[i] = 1.0  
-    obj = np.sum((decision_vars - target_point)**2, axis=1)
-    objectives.append(obj)
-objectives = np.column_stack(objectives)
+    html.Div([
+        html.H2("⬆️ Upload CSV"),
+        dcc.Upload(
+            id="upload-data",
+            children=html.Div(["Drag and Drop or ", html.A("Select Files")]),
+            style={
+                "width": "100%",
+                "height": "60px",
+                "lineHeight": "60px",
+                "borderWidth": "1px",
+                "borderStyle": "dashed",
+                "borderRadius": "5px",
+                "textAlign": "center",
+                "margin": "10px",
+            },
+            multiple=False,
+        ),
+        html.Div(id="upload-output"),
+    ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
+])
 
-# Find Pareto front
-pareto_mask = find_pareto_front(objectives)
-pareto_objectives = objectives[pareto_mask]
-
-# Find the target point
-target_point = objectives[target_point_id]
-print(f"Highlighting Point {target_point_id}")
-coords_str = ", ".join([f"Obj{i+1}={target_point[i]:.3f}" for i in range(num_objectives)])
-print(f"Coordinates: {coords_str}")
-is_pareto = pareto_mask[target_point_id]
-print(f"On Pareto Front: {'Yes' if is_pareto else 'No'}")
-
-# Convert to interactive Plotly version
-obj_names = [f'Objective {i+1}' for i in range(num_objectives)]
-
-# Create subplot matrix
-subplot_titles = []
-for i in range(num_objectives):
-    for j in range(num_objectives):
-        if i == j:
-            subplot_titles.append(obj_names[i])
-        else:
-            subplot_titles.append(f'{obj_names[j]} vs {obj_names[i]}')
-
-fig = make_subplots(
-    rows=num_objectives, 
-    cols=num_objectives,
-    subplot_titles=subplot_titles,
-    vertical_spacing=0.08,
-    horizontal_spacing=0.08
+# Populate dropdown with directories
+@app.callback(
+    Output("folder-dropdown", "options"),
+    Output("folder-dropdown", "value"),
+    Input("go-button", "n_clicks"),
+    State("folder-dropdown", "value"),
+    prevent_initial_call=True
 )
+def update_dropdown(n_clicks, selected_folder):
+    current_dir = selected_folder if selected_folder else BASE_DIR
+    try:
+        entries = os.listdir(current_dir)
+        dirs = []
+        for entry in sorted(entries):
+            full_path = os.path.join(current_dir, entry)
+            if os.path.isdir(full_path):
+                try:
+                    os.listdir(full_path)
+                    dirs.append({"label": entry, "value": full_path})
+                except PermissionError:
+                    dirs.append({"label": f"{entry} (no permission)", "value": None, "disabled": True})
+        return dirs, current_dir
+    except PermissionError:
+        return [], BASE_DIR
+    except Exception:
+        return [], BASE_DIR
 
-# Add traces to each subplot
-for i in range(num_objectives):
-    for j in range(num_objectives):
-        row = i + 1
-        col = j + 1
-        
-        if i == j:  # Diagonal - just add text
-            fig.add_trace(
-                go.Scatter(
-                    x=[0.5], y=[0.5],
-                    mode='text',
-                    text=[obj_names[i]],
-                    textfont=dict(size=16, color='black'),
-                    showlegend=False,
-                    hoverinfo='none'
-                ),
-                row=row, col=col
-            )
-            fig.update_xaxes(range=[0, 1], showticklabels=False, row=row, col=col)
-            fig.update_yaxes(range=[0, 1], showticklabels=False, row=row, col=col)
-        else:
-            # All points
-            fig.add_trace(
-                go.Scatter(
-                    x=objectives[:, j],
-                    y=objectives[:, i],
-                    mode='markers',
-                    marker=dict(size=4, color='lightblue', opacity=0.5),
-                    name='All Points',
-                    showlegend=(i == 0 and j == 1),  # Show legend only once
-                    hovertemplate=f'<b>All Points</b><br>' +
-                                f'{obj_names[j]}: %{{x:.3f}}<br>' +
-                                f'{obj_names[i]}: %{{y:.3f}}<br>' +
-                                '<extra></extra>'
-                ),
-                row=row, col=col
-            )
-            
-            # Pareto front points
-            fig.add_trace(
-                go.Scatter(
-                    x=pareto_objectives[:, j],
-                    y=pareto_objectives[:, i],
-                    mode='markers',
-                    marker=dict(size=6, color='blue', opacity=0.7),
-                    name='Pareto Front',
-                    showlegend=(i == 0 and j == 1),  # Show legend only once
-                    hovertemplate=f'<b>Pareto Front</b><br>' +
-                                f'{obj_names[j]}: %{{x:.3f}}<br>' +
-                                f'{obj_names[i]}: %{{y:.3f}}<br>' +
-                                '<extra></extra>'
-                ),
-                row=row, col=col
-            )
-            
-            # Target point
-            fig.add_trace(
-                go.Scatter(
-                    x=[target_point[j]],
-                    y=[target_point[i]],
-                    mode='markers',
-                    marker=dict(
-                        size=15, 
-                        color='red', 
-                        symbol='star',
-                        line=dict(width=2, color='darkred')
-                    ),
-                    name=f'Point {target_point_id}',
-                    showlegend=(i == 0 and j == 1),  # Show legend only once
-                    hovertemplate=f'<b>Point {target_point_id}</b><br>' +
-                                f'{obj_names[j]}: %{{x:.3f}}<br>' +
-                                f'{obj_names[i]}: %{{y:.3f}}<br>' +
-                                f'On Pareto Front: {"Yes" if is_pareto else "No"}<br>' +
-                                '<extra></extra>'
-                ),
-                row=row, col=col
-            )
-            
-            # Update axis labels
-            fig.update_xaxes(title_text=obj_names[j], row=row, col=col)
-            fig.update_yaxes(title_text=obj_names[i], row=row, col=col)
-
-# Update layout
-fig.update_layout(
-    title=f'{num_objectives}x{num_objectives} Interactive Scatter Plot Matrix',
-    height=num_objectives * 300,
-    width=num_objectives * 300,
-    showlegend=True,
-    legend=dict(
-        orientation="h",
-        yanchor="bottom",
-        y=1.02,
-        xanchor="right",
-        x=1
-    )
+# Show files in the selected EOS folder
+@app.callback(
+    Output("eos-file-list", "children"),
+    Input("folder-dropdown", "value")
 )
+def show_eos_files(selected_folder):
+    if selected_folder:
+        try:
+            entries = os.listdir(selected_folder)
+            items = []
+            for entry in sorted(entries):
+                path = os.path.join(selected_folder, entry)
+                if os.path.isfile(path) and entry.endswith(".csv"):
+                    items.append(html.Button(entry, id={"type": "eos-file", "name": path}))
+                elif os.path.isdir(path):
+                    items.append(html.Div(f"📁 {entry}/"))
+            if not items:
+                return html.P("This folder is empty or has no CSV files.")
+            return html.Div(items)
+        except PermissionError:
+            return html.P("❌ Permission denied for this folder")
+        except Exception as e:
+            return html.P(f"⚠️ Error: {e}")
+    return html.P("📁 Select a folder to browse")
 
-# Show the interactive plot
-fig.show()
+# Handle click on EOS CSV files
+@app.callback(
+    Output("upload-output", "children"),
+    Input({"type": "eos-file", "name": ALL}, "n_clicks"),
+    prevent_initial_call=True
+)
+def load_eos_csv(n_clicks):
+    triggered_id = ctx.triggered_id
+    if triggered_id and "name" in triggered_id:
+        file_path = triggered_id["name"]
+        try:
+            df = pd.read_csv(file_path)
+            return dash_table.DataTable(
+                data=df.to_dict("records"),
+                columns=[{"name": i, "id": i} for i in df.columns],
+                page_size=10,
+                style_table={"overflowX": "auto"},
+            )
+        except Exception as e:
+            return html.P(f"⚠️ Failed to load CSV: {e}")
+    return html.P("No file selected.")
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8080, debug=True)
+# Handle local CSV upload
+@app.callback(
+    Output("upload-output", "children", allow_duplicate=True),
+    Input("upload-data", "contents"),
+    State("upload-data", "filename"),
+    prevent_initial_call=True
+)
+def upload_csv(contents, filename):
+    if contents:
+        try:
+            content_type, content_string = contents.split(",")
+            decoded = pd.read_csv(pd.compat.StringIO(content_string))
+            return dash_table.DataTable(
+                data=decoded.to_dict("records"),
+                columns=[{"name": i, "id": i} for i in decoded.columns],
+                page_size=10,
+                style_table={"overflowX": "auto"},
+            )
+        except Exception as e:
+            return html.P(f"⚠️ Error reading uploaded file: {e}")
+    return html.P("No file uploaded.")
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
