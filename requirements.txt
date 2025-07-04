@@ -1,3 +1,4 @@
 dash
 flask
 pandas
+dash-table
