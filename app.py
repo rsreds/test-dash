@@ -1,5 +1,4 @@
-from dash import Dash, html, dcc, Input, Output, State, ctx
-import dash_table
+from dash import Dash, html, dcc, Input, Output, State, ctx, dash_table
 import pandas as pd
 import os
 
@@ -39,7 +38,6 @@ app.layout = html.Div([
     ], style={"width": "48%", "display": "inline-block", "verticalAlign": "top"}),
 ])
 
-# Populate dropdown with directories
 @app.callback(
     Output("folder-dropdown", "options"),
     Output("folder-dropdown", "value"),
@@ -66,7 +64,6 @@ def update_dropdown(n_clicks, selected_folder):
     except Exception:
         return [], BASE_DIR
 
-# Show files in the selected EOS folder
 @app.callback(
     Output("eos-file-list", "children"),
     Input("folder-dropdown", "value")
@@ -91,7 +88,8 @@ def show_eos_files(selected_folder):
             return html.P(f"⚠️ Error: {e}")
     return html.P("📁 Select a folder to browse")
 
-# Handle click on EOS CSV files
+from dash.dependencies import ALL
+
 @app.callback(
     Output("upload-output", "children"),
     Input({"type": "eos-file", "name": ALL}, "n_clicks"),
@@ -113,7 +111,6 @@ def load_eos_csv(n_clicks):
             return html.P(f"⚠️ Failed to load CSV: {e}")
     return html.P("No file selected.")
 
-# Handle local CSV upload
 @app.callback(
     Output("upload-output", "children", allow_duplicate=True),
     Input("upload-data", "contents"),
@@ -124,10 +121,13 @@ def upload_csv(contents, filename):
     if contents:
         try:
             content_type, content_string = contents.split(",")
-            decoded = pd.read_csv(pd.compat.StringIO(content_string))
+            import base64
+            import io
+            decoded = base64.b64decode(content_string)
+            df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
             return dash_table.DataTable(
-                data=decoded.to_dict("records"),
-                columns=[{"name": i, "id": i} for i in decoded.columns],
+                data=df.to_dict("records"),
+                columns=[{"name": i, "id": i} for i in df.columns],
                 page_size=10,
                 style_table={"overflowX": "auto"},
             )
