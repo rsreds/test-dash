@@ -11,7 +11,7 @@ app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 app.title = "Multi-Objective Optimization Visualization"
 
 #  data generation
-num_objectives = 3
+num_objectives = 4
 target_point_id = 657
 np.random.seed(42)
 n_points = 2000
