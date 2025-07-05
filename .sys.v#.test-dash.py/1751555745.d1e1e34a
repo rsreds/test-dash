@@ -1,0 +1,43 @@
+import base64
+import io
+import pandas as pd
+from dash import Dash, html, dcc, Input, Output, State
+from jupyter_dash import JupyterDash
+
+app = JupyterDash(__name__)
+app.title = "Simple CSV Printer"
+
+app.layout = html.Div([
+    html.H2("Upload CSV File"),
+    dcc.Upload(
+        id='upload-data',
+        children=html.Div(['Drag and Drop or ', html.A('Select File')]),
+        style={
+            'width': '50%', 'height': '60px',
+            'lineHeight': '60px', 'borderWidth': '1px',
+            'borderStyle': 'dashed', 'borderRadius': '5px',
+            'textAlign': 'center', 'margin': '10px'
+        },
+        multiple=False
+    ),
+    html.Pre(id='output')
+])
+
+@app.callback(
+    Output('output', 'children'),
+    Input('upload-data', 'contents'),
+    State('upload-data', 'filename')
+)
+def display_contents(contents, filename):
+    if contents is None:
+        return ""
+    content_type, content_string = contents.split(',')
+    decoded = base64.b64decode(content_string)
+    try:
+        df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+    except Exception as e:
+        return f"Error reading file: {e}"
+    return df.to_string(index=False)
+
+if __name__ == '__main__':
+    app.run(host= '0.0.0.0', port= '8050')
