@@ -167,8 +167,6 @@ fig.update_layout(
     )
 )
 
-# Show the interactive plot
-fig.show()
 
 app.layout = html.Div([
     html.H2("Multi-Objective Optimization Visualization"),
