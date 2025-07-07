@@ -12,9 +12,9 @@ app.title = "Multi-Objective Optimization Visualization"
 
 #  data generation
 num_objectives = 4
-target_point_id = 657
+target_point_id = 233
 np.random.seed(42)
-n_points = 2000
+n_points = 500
 
 def find_pareto_front(points):
     """Find Pareto optimal points"""
