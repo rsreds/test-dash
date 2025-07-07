@@ -170,5 +170,10 @@ fig.update_layout(
 # Show the interactive plot
 fig.show()
 
+app.layout = html.Div([
+    html.H2("Multi-Objective Optimization Visualization"),
+    dcc.Graph(figure=fig)
+])
+
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080, debug=True)
