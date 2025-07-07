@@ -1,3 +1,7 @@
-dash
-flask
+numpy
+plotly.express
+plotly.graph_objects
+plotly.subplots
 pandas
+dash
+dash_bootstrap_components
