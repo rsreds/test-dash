@@ -4,7 +4,7 @@ import os
 
 app = Dash(__name__)
 
-BASE_DIR = "/eos/"
+BASE_DIR = "/eos/home-o/"
 
 app.layout = html.Div([
     html.H1("EOS Browser & CSV Uploader"),
