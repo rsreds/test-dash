@@ -37,12 +37,20 @@ app.layout = html.Div([
     dcc.Graph(id='plot-output')
 ])
 
+<<<<<<< HEAD
 def extract_data_from_pso(pso_object):
     """Extract objectives data from PSO object"""
     # Extract fitness from all particles
     all_objectives = []
     for particle in pso_object.particles:
         all_objectives.append(particle.fitness)
+=======
+#  data generation
+num_objectives = 4
+target_point_id = 233
+np.random.seed(42)
+n_points = 500
+>>>>>>> 3c9a321e497ff5362a864dbd5e34d06ef88751c5
 
     # Extract fitness from pareto front
     pareto_objectives_list = []
@@ -187,6 +195,7 @@ def create_visualization(objectives, pareto_objectives, target_point_id=6):
         )
     )
 
+<<<<<<< HEAD
     return fig
 
 @app.callback(
@@ -236,6 +245,13 @@ def update_visualization(contents, target_point_id, filename):
             html.P("Please ensure you've uploaded a valid PSO pickle file.")
         ])
         return {}, error_msg, {'display': 'none'}
+=======
+
+app.layout = html.Div([
+    html.H2("Multi-Objective Optimization Visualization"),
+    dcc.Graph(figure=fig)
+])
+>>>>>>> 3c9a321e497ff5362a864dbd5e34d06ef88751c5
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080, debug=True)

@@ -1,5 +1,7 @@
 numpy
+plotly.express
 plotly.graph_objects
 plotly.subplots
+pandas
 dash
-dill
+dash_bootstrap_components
