@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir \
     plotly \
     dill\
     dash \
+    TheOptimizer\
     dash-bootstrap-components
 
 EXPOSE 8080
