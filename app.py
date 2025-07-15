@@ -1,4 +1,3 @@
-import optimizer
 import base64
 import io
 import dill as pickle
