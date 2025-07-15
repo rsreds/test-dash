@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir \
     numpy \
     pandas \
     plotly \
+    dill\
     dash \
     dash-bootstrap-components
 
