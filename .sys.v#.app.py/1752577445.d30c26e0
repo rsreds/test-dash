@@ -1,3 +1,5 @@
+import sys
+sys.path.append("/eos/user/g/goguare/The-Optimizer")
 import optimizer
 import base64
 import io
