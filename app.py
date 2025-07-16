@@ -10,7 +10,6 @@ from dash import Dash, html, dcc, Input, Output, State
 app = Dash(__name__)
 app.title = "PSO Visualization"
 
-# Placeholder
 param = []
 lb = []
 ub = []
@@ -24,27 +23,29 @@ app.layout = html.Div([
             'width': '50%', 'height': '60px',
             'lineHeight': '60px', 'borderWidth': '1px',
             'borderStyle': 'dashed', 'borderRadius': '5px',
-            'textAlign': 'center', 'margin': '10px'
+            'textAlign': 'center', 'margin': '10px auto'
         },
         multiple=False,
         accept='.pkl,.pickle'
     ),
 
-    html.Div(id='slider-output'),
+    html.Div(id='info-output', style={'margin': '20px', 'textAlign': 'center'}),
+
+    dcc.Graph(id='plot-output', style={'margin': 'auto', 'width': '90%', 'maxWidth': '1200px'}),
+
+    # Sliders placed here below graph with simple styling
+    html.Div(id='slider-output', style={'margin': '20px 10%', 'maxWidth': '1200px'}),
 
     html.Div([
-        html.Label("Target Point ID:"),
+        html.Label("Target Point ID:", style={'fontWeight': 'bold'}),
         dcc.Input(
             id='target-point-input',
             type='number',
             value=6,
             min=0,
-            style={'margin': '10px'}
+            style={'margin': '10px', 'padding': '5px', 'width': '60px'}
         )
-    ], id='controls', style={'margin': '20px', 'display': 'none'}),  # initially hidden until upload
-
-    html.Div(id='info-output', style={'margin': '20px'}),
-    dcc.Graph(id='plot-output')
+    ], id='controls', style={'margin': '20px auto', 'display': 'none', 'textAlign': 'center', 'maxWidth': '1200px'})
 ])
 
 def extract_data_from_pso(pso_object):
@@ -65,7 +66,6 @@ def create_visualization(objectives, pareto_objectives, target_point_id=6):
     if target_point_id >= len(objectives):
         target_point_id = 0
     target_point = objectives[target_point_id]
-    is_pareto = any(np.allclose(target_point, pf_point, rtol=1e-10) for pf_point in pareto_objectives)
     obj_names = [f'Objective {i+1}' for i in range(num_objectives)]
     subplot_titles = [f'{obj_names[j]} vs {obj_names[i]}' if i != j else obj_names[i] 
                       for i in range(num_objectives) for j in range(num_objectives)]
@@ -143,7 +143,6 @@ def update_visualization(contents, target_point_id, filename):
         decoded = base64.b64decode(content_string)
         pso_object = pickle.load(io.BytesIO(decoded))
 
-        # Extract param and bounds dynamically
         param = pso_object.pareto_front[0].position
         lb = pso_object.lower_bounds
         ub = pso_object.upper_bounds
@@ -162,21 +161,19 @@ def update_visualization(contents, target_point_id, filename):
             html.P(f"Target point ID: {target_point_id}")
         ])
 
-        # Create dynamic sliders for all parameters
         slider_children = []
         for i in range(len(param)):
-            slider_children.append(html.P(f"Filter by Parameter {i}:"))
-            step_size = (ub[i] - lb[i]) / 100 if ub[i] > lb[i] else 0.01
-            slider_children.append(
+            slider_children.append(html.Div([
+                html.Label(f"Filter by Parameter {i}:", style={'marginBottom': '5px'}),
                 dcc.RangeSlider(
                     id=f"range-slider-{i}",
                     min=lb[i],
                     max=ub[i],
-                    step=step_size,
+                    step=(ub[i] - lb[i]) / 100 if ub[i] > lb[i] else 0.01,
                     value=[lb[i], ub[i]],
                     tooltip={"placement": "bottom", "always_visible": True}
                 )
-            )
+            ], style={'marginBottom': '20px'}))
 
         slider_div = html.Div(slider_children)
 
@@ -188,7 +185,6 @@ def update_visualization(contents, target_point_id, filename):
             html.P("Please ensure you've uploaded a valid PSO pickle file.")
         ])
         return {}, error_msg, html.Div(), {'display': 'none'}
-
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080, debug=True)
