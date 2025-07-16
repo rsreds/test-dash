@@ -10,9 +10,10 @@ from dash import Dash, html, dcc, Input, Output, State
 app = Dash(__name__)
 app.title = "PSO Visualization"
 
-param_0 = pso.pareto_front[0].position[0]
-lb_0 = pso.lower_bounds[0]
-ub_0 = pso.upper_bounds[0]
+# Placeholder
+param = []
+lb = []
+ub = []
 
 app.layout = html.Div([
     html.H2("Upload Pickle File"),
@@ -29,19 +30,8 @@ app.layout = html.Div([
         accept='.pkl,.pickle'
     ),
 
-     html.Div([
-        html.P("Filter by parameters:"),
-        dcc.RangeSlider(
-            id="range slider",
-            min= lb_0,
-            max= ub_0,
-            step= (lb_0 - ub_0) / 100,
-            value= (lb_0 + ub_0) /2,
-            tooltip={"placement": "bottom", "always_visible": True}
-    ),
     html.Div(id='slider-output'),
-  ]),
-    
+
     html.Div([
         html.Label("Target Point ID:"),
         dcc.Input(
@@ -51,55 +41,35 @@ app.layout = html.Div([
             min=0,
             style={'margin': '10px'}
         )
-    ], id='controls', style={'margin': '20px'}),
+    ], id='controls', style={'margin': '20px', 'display': 'none'}),  # initially hidden until upload
+
     html.Div(id='info-output', style={'margin': '20px'}),
     dcc.Graph(id='plot-output')
 ])
 
 def extract_data_from_pso(pso_object):
-    """Extract objectives data from PSO object"""
-    # Extract fitness from all particles
     all_objectives = []
     for particle in pso_object.particles:
         all_objectives.append(particle.fitness)
 
-    # Extract fitness from pareto front
-    pareto_objectives_list = []
+    pareto_objectives = []
     for particle in pso_object.pareto_front:
-        pareto_objectives_list.append(particle.fitness)
+        pareto_objectives.append(particle.fitness)
 
-    # Convert to numpy arrays
     objectives = np.array(all_objectives)
-    pareto_objectives = np.array(pareto_objectives_list)
-    
+    pareto_objectives = np.array(pareto_objectives)
     return objectives, pareto_objectives
 
 def create_visualization(objectives, pareto_objectives, target_point_id=6):
-    """Create the interactive scatter plot matrix"""
     num_objectives = objectives.shape[1]
-    
-    # Validate target point ID
     if target_point_id >= len(objectives):
         target_point_id = 0
-    
     target_point = objectives[target_point_id]
-
-    # Check if target point is on pareto front
     is_pareto = any(np.allclose(target_point, pf_point, rtol=1e-10) for pf_point in pareto_objectives)
-
-    # Create objective names
     obj_names = [f'Objective {i+1}' for i in range(num_objectives)]
+    subplot_titles = [f'{obj_names[j]} vs {obj_names[i]}' if i != j else obj_names[i] 
+                      for i in range(num_objectives) for j in range(num_objectives)]
 
-    # Create subplot titles
-    subplot_titles = []
-    for i in range(num_objectives):
-        for j in range(num_objectives):
-            if i == j:
-                subplot_titles.append(obj_names[i])
-            else:
-                subplot_titles.append(f'{obj_names[j]} vs {obj_names[i]}')
-
-    # Create subplots
     fig = make_subplots(
         rows=num_objectives, 
         cols=num_objectives,
@@ -108,104 +78,49 @@ def create_visualization(objectives, pareto_objectives, target_point_id=6):
         horizontal_spacing=0.08
     )
 
-    # Add traces
     for i in range(num_objectives):
         for j in range(num_objectives):
             row = i + 1
             col = j + 1
-            
+
             if i == j:
-                # Diagonal elements - just show objective name
                 fig.add_trace(
-                    go.Scatter(
-                        x=[0.5], y=[0.5],
-                        mode='text',
-                        text=[obj_names[i]],
-                        textfont=dict(size=16, color='black'),
-                        showlegend=False,
-                        hoverinfo='none'
-                    ),
+                    go.Scatter(x=[0.5], y=[0.5], mode='text', text=[obj_names[i]],
+                               textfont=dict(size=16), showlegend=False, hoverinfo='none'),
                     row=row, col=col
                 )
                 fig.update_xaxes(range=[0, 1], showticklabels=False, row=row, col=col)
                 fig.update_yaxes(range=[0, 1], showticklabels=False, row=row, col=col)
             else:
-                # All points
                 fig.add_trace(
-                    go.Scatter(
-                        x=objectives[:, j],
-                        y=objectives[:, i],
-                        mode='markers',
-                        marker=dict(size=4, color='grey', opacity=0.5),
-                        name='All Points',
-                        showlegend=(i == 0 and j == 1),
-                        hovertemplate=f'<b>All Points</b><br>' +
-                                    f'{obj_names[j]}: %{{x:.3f}}<br>' +
-                                    f'{obj_names[i]}: %{{y:.3f}}<br>' +
-                                    '<extra></extra>'
-                    ),
+                    go.Scatter(x=objectives[:, j], y=objectives[:, i], mode='markers',
+                               marker=dict(size=4, color='grey', opacity=0.5),
+                               name='All Points', showlegend=(i == 0 and j == 1)),
                     row=row, col=col
                 )
-                
-                # Pareto front points
                 fig.add_trace(
-                    go.Scatter(
-                        x=pareto_objectives[:, j],
-                        y=pareto_objectives[:, i],
-                        mode='markers',
-                        marker=dict(size=6, color='blue', opacity=0.7),
-                        name='Pareto Front',
-                        showlegend=(i == 0 and j == 1), 
-                        hovertemplate=f'<b>Pareto Front</b><br>' +
-                                    f'{obj_names[j]}: %{{x:.3f}}<br>' +
-                                    f'{obj_names[i]}: %{{y:.3f}}<br>' +
-                                    '<extra></extra>'
-                    ),
+                    go.Scatter(x=pareto_objectives[:, j], y=pareto_objectives[:, i], mode='markers',
+                               marker=dict(size=6, color='blue', opacity=0.7),
+                               name='Pareto Front', showlegend=(i == 0 and j == 1)),
                     row=row, col=col
                 )
-                
-                # Target point
                 fig.add_trace(
-                    go.Scatter(
-                        x=[target_point[j]],
-                        y=[target_point[i]],
-                        mode='markers',
-                        marker=dict(
-                            size=10, 
-                            color='red', 
-                            symbol='star',
-                            line=dict(width=2, color='darkred')
-                        ),
-                        name=f'Point {target_point_id}',
-                        showlegend=(i == 0 and j == 1), 
-                        hovertemplate=f'<b>Point {target_point_id}</b><br>' +
-                                    f'{obj_names[j]}: %{{x:.3f}}<br>' +
-                                    f'{obj_names[i]}: %{{y:.3f}}<br>' +
-                                    f'On Pareto Front: {"Yes" if is_pareto else "No"}<br>' +
-                                    '<extra></extra>'
-                    ),
+                    go.Scatter(x=[target_point[j]], y=[target_point[i]], mode='markers',
+                               marker=dict(size=10, color='red', symbol='star',
+                                          line=dict(width=2, color='darkred')),
+                               name=f'Point {target_point_id}', showlegend=(i == 0 and j == 1)),
                     row=row, col=col
                 )
-                
-                # Update axis labels
                 fig.update_xaxes(title_text=obj_names[j], row=row, col=col)
                 fig.update_yaxes(title_text=obj_names[i], row=row, col=col)
 
-    # Update layout
     fig.update_layout(
         title=f'{num_objectives}x{num_objectives} Interactive Scatter Plot Matrix',
         height=num_objectives * 300,
         width=num_objectives * 300,
         showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-
     return fig
 
 @app.callback(
@@ -214,33 +129,31 @@ def create_visualization(objectives, pareto_objectives, target_point_id=6):
      Output('slider-output', 'children'),
      Output('controls', 'style')],
     [Input('upload-data', 'contents'),
-     Input('range slider', 'value'),
      Input('target-point-input', 'value')],
     [State('upload-data', 'filename')]
 )
-def update_visualization(contents, range_slider_value, target_point_id, filename):
+def update_visualization(contents, target_point_id, filename):
+    global param, lb, ub
+
     if contents is None:
-        return {}, "", {'display': 'none'}
-    
+        return {}, "", html.Div(), {'display': 'none'}
+
     try:
-        # Decode the uploaded file
         content_type, content_string = contents.split(',')
         decoded = base64.b64decode(content_string)
-        
-        # Load the pickle file
         pso_object = pickle.load(io.BytesIO(decoded))
-        
-        # Extract data
+
+        # Extract param and bounds dynamically
+        param = pso_object.pareto_front[0].position
+        lb = pso_object.lower_bounds
+        ub = pso_object.upper_bounds
+
         objectives, pareto_objectives = extract_data_from_pso(pso_object)
-        
-        # Validate target point ID
         if target_point_id is None or target_point_id < 0 or target_point_id >= len(objectives):
             target_point_id = 0
-        
-        # Create visualization
+
         fig = create_visualization(objectives, pareto_objectives, target_point_id)
-        
-        # Create info text
+
         info_text = html.Div([
             html.P(f"File: {filename}"),
             html.P(f"Number of particles: {len(objectives)}"),
@@ -248,18 +161,34 @@ def update_visualization(contents, range_slider_value, target_point_id, filename
             html.P(f"Pareto front size: {len(pareto_objectives)}"),
             html.P(f"Target point ID: {target_point_id}")
         ])
-        
-        #create slider text
-        slider_text = f"Selected target point: {target_point_id}"
 
-        return fig, info_text, slider_text, {'margin': '20px'}
-        
+        # Create dynamic sliders for all parameters
+        slider_children = []
+        for i in range(len(param)):
+            slider_children.append(html.P(f"Filter by Parameter {i}:"))
+            step_size = (ub[i] - lb[i]) / 100 if ub[i] > lb[i] else 0.01
+            slider_children.append(
+                dcc.RangeSlider(
+                    id=f"range-slider-{i}",
+                    min=lb[i],
+                    max=ub[i],
+                    step=step_size,
+                    value=[lb[i], ub[i]],
+                    tooltip={"placement": "bottom", "always_visible": True}
+                )
+            )
+
+        slider_div = html.Div(slider_children)
+
+        return fig, info_text, slider_div, {'margin': '20px', 'display': 'block'}
+
     except Exception as e:
         error_msg = html.Div([
             html.P(f"Error processing file: {str(e)}", style={'color': 'red'}),
             html.P("Please ensure you've uploaded a valid PSO pickle file.")
         ])
-        return {}, error_msg, {'display': 'none'}
+        return {}, error_msg, html.Div(), {'display': 'none'}
+
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080, debug=True)
