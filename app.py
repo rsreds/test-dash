@@ -33,7 +33,6 @@ app.layout = html.Div([
 
     dcc.Graph(id='plot-output', style={'margin': 'auto', 'width': '90%', 'maxWidth': '1200px'}),
 
-    # Sliders placed here below graph with simple styling
     html.Div(id='slider-output', style={'margin': '20px 10%', 'maxWidth': '1200px'}),
 
     html.Div([
@@ -57,21 +56,30 @@ def extract_data_from_pso(pso_object):
     for particle in pso_object.pareto_front:
         pareto_objectives.append(particle.fitness)
 
-    objectives = np.array(all_objectives)
-    pareto_objectives = np.array(pareto_objectives)
-    return objectives, pareto_objectives
+    return np.array(all_objectives), np.array(pareto_objectives)
 
 def create_visualization(objectives, pareto_objectives, target_point_id=6):
     num_objectives = objectives.shape[1]
+
     if target_point_id >= len(objectives):
         target_point_id = 0
+
     target_point = objectives[target_point_id]
-    obj_names = [f'Objective {i+1}' for i in range(num_objectives)]
-    subplot_titles = [f'{obj_names[j]} vs {obj_names[i]}' if i != j else obj_names[i] 
-                      for i in range(num_objectives) for j in range(num_objectives)]
+    obj_names = []
+
+    for i in range(num_objectives):
+        obj_names.append(f'Objective {i + 1}')
+
+    subplot_titles = []
+    for i in range(num_objectives):
+        for j in range(num_objectives):
+            if i != j:
+                subplot_titles.append(f'{obj_names[j]} vs {obj_names[i]}')
+            else:
+                subplot_titles.append(obj_names[i])
 
     fig = make_subplots(
-        rows=num_objectives, 
+        rows=num_objectives,
         cols=num_objectives,
         subplot_titles=subplot_titles,
         vertical_spacing=0.08,
@@ -107,7 +115,7 @@ def create_visualization(objectives, pareto_objectives, target_point_id=6):
                 fig.add_trace(
                     go.Scatter(x=[target_point[j]], y=[target_point[i]], mode='markers',
                                marker=dict(size=10, color='red', symbol='star',
-                                          line=dict(width=2, color='darkred')),
+                                           line=dict(width=2, color='darkred')),
                                name=f'Point {target_point_id}', showlegend=(i == 0 and j == 1)),
                     row=row, col=col
                 )
@@ -121,6 +129,7 @@ def create_visualization(objectives, pareto_objectives, target_point_id=6):
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
+
     return fig
 
 @app.callback(
@@ -148,6 +157,7 @@ def update_visualization(contents, target_point_id, filename):
         ub = pso_object.upper_bounds
 
         objectives, pareto_objectives = extract_data_from_pso(pso_object)
+
         if target_point_id is None or target_point_id < 0 or target_point_id >= len(objectives):
             target_point_id = 0
 
@@ -162,22 +172,19 @@ def update_visualization(contents, target_point_id, filename):
         ])
 
         slider_children = []
-        for i in range(len(param)):
-            slider_children.append(html.Div([
-                html.Label(f"Filter by Parameter {i}:", style={'marginBottom': '5px'}),
-                dcc.RangeSlider(
-                    id=f"range-slider-{i}",
-                    min=lb[i],
-                    max=ub[i],
-                    step=(ub[i] - lb[i]) / 100 if ub[i] > lb[i] else 0.01,
-                    value=[lb[i], ub[i]],
-                    tooltip={"placement": "bottom", "always_visible": True}
-                )
-            ], style={'marginBottom': '20px'}))
+        if len(param) > 0:
+            label = html.Label("Filter by Parameter 0:", style={'marginBottom': '5px'})
+            slider = dcc.RangeSlider(
+                id="range-slider-0",
+                min=lb[0],
+                max=ub[0],
+                step=(ub[0] - lb[0]) / 100 if ub[0] > lb[0] else 0.01,
+                value=[lb[0], ub[0]],
+                tooltip={"placement": "bottom", "always_visible": True}
+            )
+            slider_children.append(html.Div([label, slider], style={'marginBottom': '20px'}))
 
-        slider_div = html.Div(slider_children)
-
-        return fig, info_text, slider_div, {'margin': '20px', 'display': 'block'}
+        return fig, info_text, html.Div(slider_children), {'margin': '20px', 'display': 'block'}
 
     except Exception as e:
         error_msg = html.Div([
