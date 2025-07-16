@@ -13,6 +13,7 @@ app.title = "PSO Visualization"
 param = []
 lb = []
 ub = []
+positions = []
 
 app.layout = html.Div([
     html.H2("Upload Pickle File"),
@@ -21,16 +22,18 @@ app.layout = html.Div([
         children=html.Div(['Drag and Drop or ', html.A('Select Pickle File')]),
         style={
             'width': '50%', 'height': '60px',
-            'lineHeight': '60px', 'borderWidth': '1px',
-            'borderStyle': 'dashed', 'borderRadius': '5px',
-            'textAlign': 'center', 'margin': '10px auto'
+            'lineHeight': '60px',
+            'borderWidth': '1px',
+            'borderStyle': 'dashed',
+            'borderRadius': '5px',
+            'textAlign': 'center',
+            'margin': '10px auto'
         },
         multiple=False,
         accept='.pkl,.pickle'
     ),
 
     html.Div(id='info-output', style={'margin': '20px', 'textAlign': 'center'}),
-
     dcc.Graph(id='plot-output', style={'margin': 'auto', 'width': '90%', 'maxWidth': '1200px'}),
 
     html.Div(id='slider-output', style={'margin': '20px 10%', 'maxWidth': '1200px'}),
@@ -47,36 +50,19 @@ app.layout = html.Div([
     ], id='controls', style={'margin': '20px auto', 'display': 'none', 'textAlign': 'center', 'maxWidth': '1200px'})
 ])
 
-def extract_data_from_pso(pso_object):
-    all_objectives = []
-    for particle in pso_object.particles:
-        all_objectives.append(particle.fitness)
-
-    pareto_objectives = []
-    for particle in pso_object.pareto_front:
-        pareto_objectives.append(particle.fitness)
-
-    return np.array(all_objectives), np.array(pareto_objectives)
-
-def create_visualization(objectives, pareto_objectives, target_point_id=6):
+def create_scatter_matrix(objectives, pareto_objectives, target_point_id=6):
     num_objectives = objectives.shape[1]
 
     if target_point_id >= len(objectives):
         target_point_id = 0
 
     target_point = objectives[target_point_id]
-    obj_names = []
-
-    for i in range(num_objectives):
-        obj_names.append(f'Objective {i + 1}')
+    obj_names = [f'Objective {i+1}' for i in range(num_objectives)]
 
     subplot_titles = []
     for i in range(num_objectives):
         for j in range(num_objectives):
-            if i != j:
-                subplot_titles.append(f'{obj_names[j]} vs {obj_names[i]}')
-            else:
-                subplot_titles.append(obj_names[i])
+            subplot_titles.append(f'{obj_names[j]} vs {obj_names[i]}' if i != j else obj_names[i])
 
     fig = make_subplots(
         rows=num_objectives,
@@ -129,7 +115,6 @@ def create_visualization(objectives, pareto_objectives, target_point_id=6):
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-
     return fig
 
 @app.callback(
@@ -138,11 +123,12 @@ def create_visualization(objectives, pareto_objectives, target_point_id=6):
      Output('slider-output', 'children'),
      Output('controls', 'style')],
     [Input('upload-data', 'contents'),
-     Input('target-point-input', 'value')],
+     Input('target-point-input', 'value'),
+     Input('range-slider-0', 'value')],
     [State('upload-data', 'filename')]
 )
-def update_visualization(contents, target_point_id, filename):
-    global param, lb, ub
+def update_visualization(contents, target_point_id, param0_range, filename):
+    global param, lb, ub, positions
 
     if contents is None:
         return {}, "", html.Div(), {'display': 'none'}
@@ -156,25 +142,37 @@ def update_visualization(contents, target_point_id, filename):
         lb = pso_object.lower_bounds
         ub = pso_object.upper_bounds
 
-        objectives, pareto_objectives = extract_data_from_pso(pso_object)
+        # Get all particle positions (NxD)
+        positions = np.array([p.position for p in pso_object.particles])
+
+        objectives = np.array([p.fitness for p in pso_object.particles])
+        pareto_objectives = np.array([p.fitness for p in pso_object.pareto_front])
 
         if target_point_id is None or target_point_id < 0 or target_point_id >= len(objectives):
             target_point_id = 0
 
-        fig = create_visualization(objectives, pareto_objectives, target_point_id)
+        # Filter particles by parameter 0 range slider
+        if param0_range is not None and len(param0_range) == 2:
+            mask = (positions[:, 0] >= param0_range[0]) & (positions[:, 0] <= param0_range[1])
+            filtered_objectives = objectives[mask]
+            filtered_pareto_objectives = pareto_objectives 
+        else:
+            filtered_objectives = objectives
+            filtered_pareto_objectives = pareto_objectives
+
+        fig = create_scatter_matrix(filtered_objectives, filtered_pareto_objectives, target_point_id)
 
         info_text = html.Div([
             html.P(f"File: {filename}"),
-            html.P(f"Number of particles: {len(objectives)}"),
+            html.P(f"Number of particles (filtered): {len(filtered_objectives)}"),
             html.P(f"Number of objectives: {objectives.shape[1]}"),
             html.P(f"Pareto front size: {len(pareto_objectives)}"),
             html.P(f"Target point ID: {target_point_id}")
         ])
 
-        slider_children = []
-        if len(param) > 0:
-            label = html.Label("Filter by Parameter 0:", style={'marginBottom': '5px'})
-            slider = dcc.RangeSlider(
+        slider_div = html.Div([
+            html.Label("Filter by Parameter 0:", style={'marginBottom': '5px'}),
+            dcc.RangeSlider(
                 id="range-slider-0",
                 min=lb[0],
                 max=ub[0],
@@ -182,9 +180,9 @@ def update_visualization(contents, target_point_id, filename):
                 value=[lb[0], ub[0]],
                 tooltip={"placement": "bottom", "always_visible": True}
             )
-            slider_children.append(html.Div([label, slider], style={'marginBottom': '20px'}))
+        ], style={'marginBottom': '20px'})
 
-        return fig, info_text, html.Div(slider_children), {'margin': '20px', 'display': 'block'}
+        return fig, info_text, slider_div, {'margin': '20px', 'display': 'block'}
 
     except Exception as e:
         error_msg = html.Div([
@@ -192,6 +190,7 @@ def update_visualization(contents, target_point_id, filename):
             html.P("Please ensure you've uploaded a valid PSO pickle file.")
         ])
         return {}, error_msg, html.Div(), {'display': 'none'}
+
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080, debug=True)
