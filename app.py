@@ -10,6 +10,10 @@ from dash import Dash, html, dcc, Input, Output, State
 app = Dash(__name__)
 app.title = "PSO Visualization"
 
+param_0 = pso.pareto_front[0].position[0]
+lb_0 = pso.lower_bounds[0]
+ub_0 = pso.upper_bounds[0]
+
 app.layout = html.Div([
     html.H2("Upload Pickle File"),
     dcc.Upload(
@@ -24,6 +28,20 @@ app.layout = html.Div([
         multiple=False,
         accept='.pkl,.pickle'
     ),
+
+     html.Div([
+        html.P("Filter by parameters:"),
+        dcc.RangeSlider(
+            id="range slider",
+            min= lb_0,
+            max= ub_0,
+            step= (lb_0 - ub_0) / 100,
+            value= (lb_0 + ub_0) /2,
+            tooltip={"placement": "bottom", "always_visible": True}
+    ),
+    html.Div(id='slider-output'),
+  ]),
+    
     html.Div([
         html.Label("Target Point ID:"),
         dcc.Input(
@@ -193,12 +211,14 @@ def create_visualization(objectives, pareto_objectives, target_point_id=6):
 @app.callback(
     [Output('plot-output', 'figure'),
      Output('info-output', 'children'),
+     Output('slider-output', 'children'),
      Output('controls', 'style')],
     [Input('upload-data', 'contents'),
+     Input('range slider', 'value'),
      Input('target-point-input', 'value')],
     [State('upload-data', 'filename')]
 )
-def update_visualization(contents, target_point_id, filename):
+def update_visualization(contents, range_slider_value, target_point_id, filename):
     if contents is None:
         return {}, "", {'display': 'none'}
     
@@ -229,7 +249,10 @@ def update_visualization(contents, target_point_id, filename):
             html.P(f"Target point ID: {target_point_id}")
         ])
         
-        return fig, info_text, {'margin': '20px'}
+        #create slider text
+        slider_text = f"Selected target point: {target_point_id}"
+
+        return fig, info_text, slider_text, {'margin': '20px'}
         
     except Exception as e:
         error_msg = html.Div([
