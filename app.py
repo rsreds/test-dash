@@ -56,6 +56,15 @@ app.layout = html.Div([
             tooltip={"placement": "bottom", "always_visible": False},
             updatemode='drag'
         ),
+        html.P("Filter by Parameter 1:"),
+        dcc.RangeSlider(
+            id='param-slider-1',
+            min=0, max=10, step=0.01,
+            value=[0, 10],
+            marks={0: '0', 10: '10'},
+            tooltip={"placement": "bottom", "always_visible": False},
+            updatemode='drag'
+        ),
     ], id='slider-container', style={'margin': '20px', 'display': 'none'})
 ])
 
@@ -131,7 +140,11 @@ def create_scatter_matrix(objectives, pareto_objectives, target_point_id=0):
      Output('param-slider', 'min'),
      Output('param-slider', 'max'),
      Output('param-slider', 'value'),
-     Output('param-slider', 'marks')],
+     Output('param-slider', 'marks'),
+     Output('param-slider-1', 'min'),
+     Output('param-slider-1', 'max'),
+     Output('param-slider-1', 'value'),
+     Output('param-slider-1', 'marks')],
     Input('upload-data', 'contents'),
     State('upload-data', 'filename')
 )
@@ -139,7 +152,9 @@ def process_file(contents, filename):
     global pso_data
     
     if contents is None:
-        return "", {'display': 'none'}, {'display': 'none'}, 0, 10, [0, 10], {0: '0', 10: '10'}
+        return ("", {'display': 'none'}, {'display': 'none'}, 
+                0, 10, [0, 10], {0: '0', 10: '10'},
+                0, 10, [0, 10], {0: '0', 10: '10'})
     
     try:
         # Load PSO data
@@ -155,48 +170,73 @@ def process_file(contents, filename):
         pso_data['ub'] = pso_object.upper_bounds
         pso_data['filename'] = filename
         
-        # Set up slider
-        param_min = float(pso_data['lb'][0])
-        param_max = float(pso_data['ub'][0])
-        slider_marks = {param_min: f'{param_min:.1f}', param_max: f'{param_max:.1f}'}
+        # Set up sliders for parameter 0 and 1
+        param0_min = float(pso_data['lb'][0])
+        param0_max = float(pso_data['ub'][0])
+        slider0_marks = {param0_min: f'{param0_min:.1f}', param0_max: f'{param0_max:.1f}'}
+        
+        # Check if parameter 1 exists
+        if len(pso_data['lb']) > 1:
+            param1_min = float(pso_data['lb'][1])
+            param1_max = float(pso_data['ub'][1])
+            slider1_marks = {param1_min: f'{param1_min:.1f}', param1_max: f'{param1_max:.1f}'}
+        else:
+            # Default values if parameter 1 doesn't exist
+            param1_min, param1_max = 0, 10
+            slider1_marks = {0: '0', 10: '10'}
         
         info_text = html.Div([
             html.P(f"File: {filename}"),
             html.P(f"Particles: {len(pso_data['objectives'])}"),
             html.P(f"Objectives: {pso_data['objectives'].shape[1]}"),
+            html.P(f"Parameters: {pso_data['positions'].shape[1]}"),
             html.P(f"Pareto front: {len(pso_data['pareto_objectives'])}")
         ])
         
         return (info_text,
                 {'margin': '20px', 'display': 'block'},  # Show slider
                 {'margin': '20px', 'textAlign': 'center', 'display': 'block'},  # Show target input
-                param_min, param_max, [param_min, param_max], slider_marks)
+                param0_min, param0_max, [param0_min, param0_max], slider0_marks,
+                param1_min, param1_max, [param1_min, param1_max], slider1_marks)
                 
     except Exception as e:
         error_msg = html.P(f"Error: {str(e)}", style={'color': 'red'})
-        return error_msg, {'display': 'none'}, {'display': 'none'}, 0, 10, [0, 10], {0: '0', 10: '10'}
+        return (error_msg, {'display': 'none'}, {'display': 'none'}, 
+                0, 10, [0, 10], {0: '0', 10: '10'},
+                0, 10, [0, 10], {0: '0', 10: '10'})
 
 # Simple callback to update plot
 @app.callback(
     Output('main-plot', 'figure'),
     [Input('param-slider', 'value'),
+     Input('param-slider-1', 'value'),
      Input('target-input', 'value')],
     prevent_initial_call=True
 )
-def update_plot(slider_range, target_id):
+def update_plot(slider_range_0, slider_range_1, target_id):
     global pso_data
     
     # Check if data is loaded
     if pso_data['objectives'] is None:
         return {}
     
-    # Filter data based on slider
-    if slider_range and len(slider_range) == 2:
-        low, high = slider_range
-        mask = (pso_data['positions'][:, 0] >= low) & (pso_data['positions'][:, 0] <= high)
-        filtered_objectives = pso_data['objectives'][mask]
-    else:
-        filtered_objectives = pso_data['objectives']
+    # Start with all particles
+    mask = np.ones(len(pso_data['positions']), dtype=bool)
+    
+    # Apply parameter 0 filter
+    if slider_range_0 and len(slider_range_0) == 2:
+        low0, high0 = slider_range_0
+        mask_0 = (pso_data['positions'][:, 0] >= low0) & (pso_data['positions'][:, 0] <= high0)
+        mask = mask & mask_0
+    
+    # Apply parameter 1 filter (only if parameter 1 exists)
+    if slider_range_1 and len(slider_range_1) == 2 and pso_data['positions'].shape[1] > 1:
+        low1, high1 = slider_range_1
+        mask_1 = (pso_data['positions'][:, 1] >= low1) & (pso_data['positions'][:, 1] <= high1)
+        mask = mask & mask_1
+    
+    # Apply combined filter
+    filtered_objectives = pso_data['objectives'][mask]
     
     # Handle empty filtered data
     if len(filtered_objectives) == 0:
