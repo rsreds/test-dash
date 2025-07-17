@@ -180,7 +180,8 @@ def process_file(contents, filename):
 @app.callback(
     Output('main-plot', 'figure'),
     [Input('param-slider', 'value'),
-     Input('target-input', 'value')]
+     Input('target-input', 'value')],
+    prevent_initial_call=True
 )
 def update_plot(slider_range, target_id):
     global pso_data
@@ -197,8 +198,12 @@ def update_plot(slider_range, target_id):
     else:
         filtered_objectives = pso_data['objectives']
     
+    # Handle empty filtered data
+    if len(filtered_objectives) == 0:
+        return {}
+    
     # Validate target ID
-    if target_id is None or target_id >= len(filtered_objectives):
+    if target_id is None or target_id >= len(filtered_objectives) or target_id < 0:
         target_id = 0
     
     # Create plot
