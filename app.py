@@ -1,4 +1,5 @@
-import optimizer
+# wanna try this too.
+
 import base64
 import io
 import dill as pickle
@@ -33,10 +34,21 @@ app.layout = html.Div([
         accept='.pkl,.pickle'
     ),
 
-    html.Div(id='info-output', style={'margin': '20px', 'textAlign': 'left'}),
+    html.Div(id='info-output', style={'margin': '20px', 'textAlign': 'center'}),
     dcc.Graph(id='plot-output', style={'margin': 'auto', 'width': '90%', 'maxWidth': '1200px'}),
 
-    html.Div(id='slider-output', style={'margin': '20px 10%', 'maxWidth': '1200px'}),
+    # Placeholder slider - always exists but hidden initially
+    html.Div([
+        html.Label("Filter by Parameter 0:", style={'marginBottom': '5px'}),
+        dcc.RangeSlider(
+            id="range-slider-0",
+            min=0,
+            max=1,
+            step=0.01,
+            value=[0, 1],
+            tooltip={"placement": "bottom", "always_visible": False}
+        )
+    ], id='slider-output', style={'margin': '20px 10%', 'maxWidth': '1200px', 'display': 'none'}),
 
     html.Div([
         html.Label("Target Point ID:", style={'fontWeight': 'bold'}),
@@ -117,21 +129,27 @@ def create_scatter_matrix(objectives, pareto_objectives, target_point_id=6):
     )
     return fig
 
-# Main callback - handles file upload and creates slider
+# Single callback - handles all updates
 @app.callback(
     [Output('plot-output', 'figure'),
      Output('info-output', 'children'),
-     Output('slider-output', 'children'),
-     Output('controls', 'style')],
+     Output('slider-output', 'style'),
+     Output('controls', 'style'),
+     Output('range-slider-0', 'min'),
+     Output('range-slider-0', 'max'),
+     Output('range-slider-0', 'step'),
+     Output('range-slider-0', 'value')],
     [Input('upload-data', 'contents'),
-     Input('target-point-input', 'value')],
+     Input('target-point-input', 'value'),
+     Input('range-slider-0', 'value')],
     [State('upload-data', 'filename')]
 )
-def update_visualization(contents, target_point_id, filename):
+def update_visualization(contents, target_point_id, param0_range, filename):
     global param, lb, ub, positions
 
+    # Default values when no file is uploaded
     if contents is None:
-        return {}, "", html.Div(), {'display': 'none'}
+        return {}, "", {'display': 'none'}, {'display': 'none'}, 0, 1, 0.01, [0, 1]
 
     try:
         content_type, content_string = contents.split(',')
@@ -141,69 +159,6 @@ def update_visualization(contents, target_point_id, filename):
         param = pso_object.pareto_front[0].position
         lb = pso_object.lower_bounds
         ub = pso_object.upper_bounds
-
-        # Get all particle positions (NxD)
-        positions = np.array([p.position for p in pso_object.particles])
-
-        objectives = np.array([p.fitness for p in pso_object.particles])
-        pareto_objectives = np.array([p.fitness for p in pso_object.pareto_front])
-
-        if target_point_id is None or target_point_id < 0 or target_point_id >= len(objectives):
-            target_point_id = 0
-
-        # No filtering initially - show all particles
-        filtered_objectives = objectives
-        filtered_pareto_objectives = pareto_objectives
-
-        fig = create_scatter_matrix(filtered_objectives, filtered_pareto_objectives, target_point_id)
-
-        info_text = html.Div([
-            html.P(f"File: {filename}"),
-            html.P(f"Number of particles (filtered): {len(filtered_objectives)}"),
-            html.P(f"Number of objectives: {objectives.shape[1]}"),
-            html.P(f"Pareto front size: {len(pareto_objectives)}"),
-            html.P(f"Target point ID: {target_point_id}")
-        ])
-
-        slider_div = html.Div([
-            html.Label("Filter by Parameter 0:", style={'marginBottom': '5px'}),
-            dcc.RangeSlider(
-                id="range-slider-0",
-                min=lb[0],
-                max=ub[0],
-                step=(ub[0] - lb[0]) / 100 if ub[0] > lb[0] else 0.01,
-                value=[lb[0], ub[0]],
-                tooltip={"placement": "bottom", "always_visible": False}
-            )
-        ], style={'marginBottom': '20px'})
-
-        return fig, info_text, slider_div, {'margin': '20px', 'display': 'block'}
-
-    except Exception as e:
-        error_msg = html.Div([
-            html.P(f"Error processing file: {str(e)}", style={'color': 'red'}),
-            html.P("Please ensure you've uploaded a valid PSO pickle file.")
-        ])
-        return {}, error_msg, html.Div(), {'display': 'none'}
-
-# Separate callback - handles slider changes only
-@app.callback(
-    Output('plot-output', 'figure'),
-    [Input('range-slider-0', 'value')],
-    [State('upload-data', 'contents'),
-     State('target-point-input', 'value'),
-     State('upload-data', 'filename')]
-)
-def update_plot_with_slider(param0_range, contents, target_point_id, filename):
-    global param, lb, ub, positions
-
-    if contents is None:
-        return {}
-
-    try:
-        content_type, content_string = contents.split(',')
-        decoded = base64.b64decode(content_string)
-        pso_object = pickle.load(io.BytesIO(decoded))
 
         # Get all particle positions (NxD)
         positions = np.array([p.position for p in pso_object.particles])
@@ -225,10 +180,31 @@ def update_plot_with_slider(param0_range, contents, target_point_id, filename):
 
         fig = create_scatter_matrix(filtered_objectives, filtered_pareto_objectives, target_point_id)
 
-        return fig
+        info_text = html.Div([
+            html.P(f"File: {filename}"),
+            html.P(f"Number of particles (filtered): {len(filtered_objectives)}"),
+            html.P(f"Number of objectives: {objectives.shape[1]}"),
+            html.P(f"Pareto front size: {len(pareto_objectives)}"),
+            html.P(f"Target point ID: {target_point_id}")
+        ])
+
+        # Configure slider with real data
+        slider_min = lb[0]
+        slider_max = ub[0]
+        slider_step = (ub[0] - lb[0]) / 100 if ub[0] > lb[0] else 0.01
+        slider_value = [lb[0], ub[0]]
+
+        return (fig, info_text, 
+                {'margin': '20px 10%', 'maxWidth': '1200px', 'display': 'block'},  # Show slider
+                {'margin': '20px auto', 'display': 'block', 'textAlign': 'center', 'maxWidth': '1200px'},  # Show controls
+                slider_min, slider_max, slider_step, slider_value)
 
     except Exception as e:
-        return {}
+        error_msg = html.Div([
+            html.P(f"Error processing file: {str(e)}", style={'color': 'red'}),
+            html.P("Please ensure you've uploaded a valid PSO pickle file.")
+        ])
+        return {}, error_msg, {'display': 'none'}, {'display': 'none'}, 0, 1, 0.01, [0, 1]
 
 
 if __name__ == '__main__':
