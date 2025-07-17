@@ -1,5 +1,3 @@
-#simplify param_names
-
 import base64
 import io
 import dill as pickle
@@ -49,7 +47,6 @@ app.layout = html.Div([
     
     dcc.Graph(id='main-plot', style={'margin': 'auto', 'width': '90%'}),
     
-    # Dynamic slider container - will be populated after file upload
     html.Div(id='slider-container', style={'margin': '20px', 'display': 'none'})
 ])
 
@@ -135,7 +132,6 @@ def create_slider_component(param_index, param_name, param_min, param_max):
         )
     ])
 
-# Callback to load and process file
 @app.callback(
     [Output('file-info', 'children'),
      Output('slider-container', 'children'),
@@ -164,7 +160,7 @@ def process_file(contents, filename):
         pso_data['ub'] = pso_object.upper_bounds
         pso_data['filename'] = filename
         
-        # Extract parameter names from PSO object - simplified version
+        # Extract parameter names
         num_params = len(pso_object.lower_bounds)
         param_names = getattr(pso_object, 'param_names', None)
         if param_names is None or len(param_names) != num_params:
@@ -192,14 +188,14 @@ def process_file(contents, filename):
         
         return (info_text,
                 slider_components,
-                {'margin': '20px', 'display': 'block'},  # Show slider container
-                {'margin': '20px', 'textAlign': 'center', 'display': 'block'})  # Show target input
+                {'margin': '20px', 'display': 'block'}, 
+                {'margin': '20px', 'textAlign': 'center', 'display': 'block'}) 
                 
     except Exception as e:
         error_msg = html.P(f"Error: {str(e)}", style={'color': 'red'})
         return error_msg, [], {'display': 'none'}, {'display': 'none'}
 
-# Callback to update plot with pattern-matching for dynamic sliders
+# Callback to update plot
 @app.callback(
     Output('main-plot', 'figure'),
     [Input({'type': 'param-slider', 'index': ALL}, 'value'),
