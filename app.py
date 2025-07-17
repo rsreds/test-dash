@@ -1,3 +1,5 @@
+#simplify param_names
+
 import base64
 import io
 import dill as pickle
@@ -162,18 +164,9 @@ def process_file(contents, filename):
         pso_data['ub'] = pso_object.upper_bounds
         pso_data['filename'] = filename
         
-        # Extract parameter names from PSO object
+        # Extract parameter names from PSO object - simplified version
         num_params = len(pso_object.lower_bounds)
-        
-        # Try different possible attributes for parameter names
-        param_names = None
-        for attr in ['param_names', 'parameter_names', 'variable_names', 'var_names', 'dimensions']:
-            if hasattr(pso_object, attr):
-                param_names = getattr(pso_object, attr)
-                if param_names is not None and len(param_names) == num_params:
-                    break
-        
-        # If no parameter names found, create default names
+        param_names = getattr(pso_object, 'param_names', None)
         if param_names is None or len(param_names) != num_params:
             param_names = [f'Parameter {i}' for i in range(num_params)]
         
