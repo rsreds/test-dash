@@ -40,21 +40,23 @@ app.layout = html.Div([
     html.Div(id='file-info', style={'margin': '20px', 'textAlign': 'center'}),
     
     html.Div([
-        html.P("Filter by Parameter 0:"),
-        dcc.RangeSlider(
-            id='param-slider',
-            min=0, max=10, step=0.1,
-            value=[0, 10],
-            marks={0: '0', 10: '10'}
-        ),
-    ], id='slider-container', style={'margin': '20px', 'display': 'none'}),
-    
-    html.Div([
         html.Label("Target Point ID:"),
         dcc.Input(id='target-input', type='number', value=0, min=0, style={'margin': '10px'})
     ], id='target-container', style={'margin': '20px', 'textAlign': 'center', 'display': 'none'}),
     
-    dcc.Graph(id='main-plot', style={'margin': 'auto', 'width': '90%'})
+    dcc.Graph(id='main-plot', style={'margin': 'auto', 'width': '90%'}),
+    
+    html.Div([
+        html.P("Filter by Parameter 0:"),
+        dcc.RangeSlider(
+            id='param-slider',
+            min=0, max=10, step=0.01,
+            value=[0, 10],
+            marks={0: '0', 10: '10'},
+            tooltip={"placement": "bottom", "always_visible": False},
+            updatemode='drag'
+        ),
+    ], id='slider-container', style={'margin': '20px', 'display': 'none'})
 ])
 
 def create_scatter_matrix(objectives, pareto_objectives, target_point_id=0):
