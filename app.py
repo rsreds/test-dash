@@ -178,7 +178,7 @@ def update_visualization(contents, target_point_id, param0_range, filename):
                 max=ub[0],
                 step=(ub[0] - lb[0]) / 100 if ub[0] > lb[0] else 0.01,
                 value=[lb[0], ub[0]],
-                tooltip={"placement": "bottom", "always_visible": True}
+                tooltip={"placement": "bottom", "always_visible": False}
             )
         ], style={'marginBottom': '20px'})
 
