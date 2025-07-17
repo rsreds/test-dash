@@ -4,7 +4,7 @@ import dill as pickle
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from dash import Dash, html, dcc, Input, Output, State
+from dash import Dash, html, dcc, Input, Output, State, ALL
 
 app = Dash(__name__)
 app.title = "PSO Visualization"
@@ -16,7 +16,8 @@ pso_data = {
     'positions': None,
     'lb': None,
     'ub': None,
-    'filename': None
+    'filename': None,
+    'param_names': None
 }
 
 app.layout = html.Div([
@@ -46,26 +47,8 @@ app.layout = html.Div([
     
     dcc.Graph(id='main-plot', style={'margin': 'auto', 'width': '90%'}),
     
-    html.Div([
-        html.P("Filter by Parameter 0:"),
-        dcc.RangeSlider(
-            id='param-slider',
-            min=0, max=10, step=0.01,
-            value=[0, 10],
-            marks={0: '0', 10: '10'},
-            tooltip={"placement": "bottom", "always_visible": False},
-            updatemode='drag'
-        ),
-        html.P("Filter by Parameter 1:"),
-        dcc.RangeSlider(
-            id='param-slider-1',
-            min=0, max=10, step=0.01,
-            value=[0, 10],
-            marks={0: '0', 10: '10'},
-            tooltip={"placement": "bottom", "always_visible": False},
-            updatemode='drag'
-        ),
-    ], id='slider-container', style={'margin': '20px', 'display': 'none'})
+    # Dynamic slider container - will be populated after file upload
+    html.Div(id='slider-container', style={'margin': '20px', 'display': 'none'})
 ])
 
 def create_scatter_matrix(objectives, pareto_objectives, target_point_id=0):
@@ -132,19 +115,30 @@ def create_scatter_matrix(objectives, pareto_objectives, target_point_id=0):
     )
     return fig
 
+def create_slider_component(param_index, param_name, param_min, param_max):
+    """Create a single slider component for a parameter"""
+    slider_marks = {param_min: f'{param_min:.1f}', param_max: f'{param_max:.1f}'}
+    
+    return html.Div([
+        html.P(f"Filter by {param_name}:", style={'marginBottom': '5px', 'marginTop': '15px'}),
+        dcc.RangeSlider(
+            id={'type': 'param-slider', 'index': param_index},
+            min=param_min,
+            max=param_max,
+            step=(param_max - param_min) / 100 if param_max > param_min else 0.01,
+            value=[param_min, param_max],
+            marks=slider_marks,
+            tooltip={"placement": "bottom", "always_visible": False},
+            updatemode='drag'
+        )
+    ])
+
 # Callback to load and process file
 @app.callback(
     [Output('file-info', 'children'),
+     Output('slider-container', 'children'),
      Output('slider-container', 'style'),
-     Output('target-container', 'style'),
-     Output('param-slider', 'min'),
-     Output('param-slider', 'max'),
-     Output('param-slider', 'value'),
-     Output('param-slider', 'marks'),
-     Output('param-slider-1', 'min'),
-     Output('param-slider-1', 'max'),
-     Output('param-slider-1', 'value'),
-     Output('param-slider-1', 'marks')],
+     Output('target-container', 'style')],
     Input('upload-data', 'contents'),
     State('upload-data', 'filename')
 )
@@ -152,9 +146,7 @@ def process_file(contents, filename):
     global pso_data
     
     if contents is None:
-        return ("", {'display': 'none'}, {'display': 'none'}, 
-                0, 10, [0, 10], {0: '0', 10: '10'},
-                0, 10, [0, 10], {0: '0', 10: '10'})
+        return "", [], {'display': 'none'}, {'display': 'none'}
     
     try:
         # Load PSO data
@@ -170,50 +162,58 @@ def process_file(contents, filename):
         pso_data['ub'] = pso_object.upper_bounds
         pso_data['filename'] = filename
         
-        # Set up sliders for parameter 0 and 1
-        param0_min = float(pso_data['lb'][0])
-        param0_max = float(pso_data['ub'][0])
-        slider0_marks = {param0_min: f'{param0_min:.1f}', param0_max: f'{param0_max:.1f}'}
+        # Extract parameter names from PSO object
+        num_params = len(pso_object.lower_bounds)
         
-        # Check if parameter 1 exists
-        if len(pso_data['lb']) > 1:
-            param1_min = float(pso_data['lb'][1])
-            param1_max = float(pso_data['ub'][1])
-            slider1_marks = {param1_min: f'{param1_min:.1f}', param1_max: f'{param1_max:.1f}'}
-        else:
-            # Default values if parameter 1 doesn't exist
-            param1_min, param1_max = 0, 10
-            slider1_marks = {0: '0', 10: '10'}
+        # Try different possible attributes for parameter names
+        param_names = None
+        for attr in ['param_names', 'parameter_names', 'variable_names', 'var_names', 'dimensions']:
+            if hasattr(pso_object, attr):
+                param_names = getattr(pso_object, attr)
+                if param_names is not None and len(param_names) == num_params:
+                    break
         
+        # If no parameter names found, create default names
+        if param_names is None or len(param_names) != num_params:
+            param_names = [f'Parameter {i}' for i in range(num_params)]
+        
+        pso_data['param_names'] = param_names
+        
+        # Create info display
         info_text = html.Div([
             html.P(f"File: {filename}"),
             html.P(f"Particles: {len(pso_data['objectives'])}"),
             html.P(f"Objectives: {pso_data['objectives'].shape[1]}"),
-            html.P(f"Parameters: {pso_data['positions'].shape[1]}"),
+            html.P(f"Parameters: {len(pso_data['param_names'])}"),
             html.P(f"Pareto front: {len(pso_data['pareto_objectives'])}")
         ])
         
+        # Create sliders dynamically for all parameters
+        slider_components = []
+        for i, param_name in enumerate(pso_data['param_names']):
+            param_min = float(pso_data['lb'][i])
+            param_max = float(pso_data['ub'][i])
+            slider_components.append(
+                create_slider_component(i, param_name, param_min, param_max)
+            )
+        
         return (info_text,
-                {'margin': '20px', 'display': 'block'},  # Show slider
-                {'margin': '20px', 'textAlign': 'center', 'display': 'block'},  # Show target input
-                param0_min, param0_max, [param0_min, param0_max], slider0_marks,
-                param1_min, param1_max, [param1_min, param1_max], slider1_marks)
+                slider_components,
+                {'margin': '20px', 'display': 'block'},  # Show slider container
+                {'margin': '20px', 'textAlign': 'center', 'display': 'block'})  # Show target input
                 
     except Exception as e:
         error_msg = html.P(f"Error: {str(e)}", style={'color': 'red'})
-        return (error_msg, {'display': 'none'}, {'display': 'none'}, 
-                0, 10, [0, 10], {0: '0', 10: '10'},
-                0, 10, [0, 10], {0: '0', 10: '10'})
+        return error_msg, [], {'display': 'none'}, {'display': 'none'}
 
-# Simple callback to update plot
+# Callback to update plot with pattern-matching for dynamic sliders
 @app.callback(
     Output('main-plot', 'figure'),
-    [Input('param-slider', 'value'),
-     Input('param-slider-1', 'value'),
+    [Input({'type': 'param-slider', 'index': ALL}, 'value'),
      Input('target-input', 'value')],
     prevent_initial_call=True
 )
-def update_plot(slider_range_0, slider_range_1, target_id):
+def update_plot(slider_values, target_id):
     global pso_data
     
     # Check if data is loaded
@@ -223,17 +223,12 @@ def update_plot(slider_range_0, slider_range_1, target_id):
     # Start with all particles
     mask = np.ones(len(pso_data['positions']), dtype=bool)
     
-    # Apply parameter 0 filter
-    if slider_range_0 and len(slider_range_0) == 2:
-        low0, high0 = slider_range_0
-        mask_0 = (pso_data['positions'][:, 0] >= low0) & (pso_data['positions'][:, 0] <= high0)
-        mask = mask & mask_0
-    
-    # Apply parameter 1 filter (only if parameter 1 exists)
-    if slider_range_1 and len(slider_range_1) == 2 and pso_data['positions'].shape[1] > 1:
-        low1, high1 = slider_range_1
-        mask_1 = (pso_data['positions'][:, 1] >= low1) & (pso_data['positions'][:, 1] <= high1)
-        mask = mask & mask_1
+    # Apply filters for all parameters
+    for i, slider_range in enumerate(slider_values):
+        if slider_range and len(slider_range) == 2 and i < pso_data['positions'].shape[1]:
+            low, high = slider_range
+            param_mask = (pso_data['positions'][:, i] >= low) & (pso_data['positions'][:, i] <= high)
+            mask = mask & param_mask
     
     # Apply combined filter
     filtered_objectives = pso_data['objectives'][mask]
