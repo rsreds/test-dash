@@ -33,7 +33,7 @@ app.layout = html.Div([
         accept='.pkl,.pickle'
     ),
 
-    html.Div(id='info-output', style={'margin': '20px', 'textAlign': 'center'}),
+    html.Div(id='info-output', style={'margin': '20px', 'textAlign': 'left'}),
     dcc.Graph(id='plot-output', style={'margin': 'auto', 'width': '90%', 'maxWidth': '1200px'}),
 
     html.Div(id='slider-output', style={'margin': '20px 10%', 'maxWidth': '1200px'}),
@@ -117,17 +117,17 @@ def create_scatter_matrix(objectives, pareto_objectives, target_point_id=6):
     )
     return fig
 
+# Main callback - handles file upload and creates slider
 @app.callback(
     [Output('plot-output', 'figure'),
      Output('info-output', 'children'),
      Output('slider-output', 'children'),
      Output('controls', 'style')],
     [Input('upload-data', 'contents'),
-     Input('target-point-input', 'value'),
-     Input('range-slider-0', 'value')],
+     Input('target-point-input', 'value')],
     [State('upload-data', 'filename')]
 )
-def update_visualization(contents, target_point_id, param0_range, filename):
+def update_visualization(contents, target_point_id, filename):
     global param, lb, ub, positions
 
     if contents is None:
@@ -151,14 +151,9 @@ def update_visualization(contents, target_point_id, param0_range, filename):
         if target_point_id is None or target_point_id < 0 or target_point_id >= len(objectives):
             target_point_id = 0
 
-        # Filter particles by parameter 0 range slider
-        if param0_range is not None and len(param0_range) == 2:
-            mask = (positions[:, 0] >= param0_range[0]) & (positions[:, 0] <= param0_range[1])
-            filtered_objectives = objectives[mask]
-            filtered_pareto_objectives = pareto_objectives 
-        else:
-            filtered_objectives = objectives
-            filtered_pareto_objectives = pareto_objectives
+        # No filtering initially - show all particles
+        filtered_objectives = objectives
+        filtered_pareto_objectives = pareto_objectives
 
         fig = create_scatter_matrix(filtered_objectives, filtered_pareto_objectives, target_point_id)
 
@@ -190,6 +185,50 @@ def update_visualization(contents, target_point_id, param0_range, filename):
             html.P("Please ensure you've uploaded a valid PSO pickle file.")
         ])
         return {}, error_msg, html.Div(), {'display': 'none'}
+
+# Separate callback - handles slider changes only
+@app.callback(
+    Output('plot-output', 'figure'),
+    [Input('range-slider-0', 'value')],
+    [State('upload-data', 'contents'),
+     State('target-point-input', 'value'),
+     State('upload-data', 'filename')]
+)
+def update_plot_with_slider(param0_range, contents, target_point_id, filename):
+    global param, lb, ub, positions
+
+    if contents is None:
+        return {}
+
+    try:
+        content_type, content_string = contents.split(',')
+        decoded = base64.b64decode(content_string)
+        pso_object = pickle.load(io.BytesIO(decoded))
+
+        # Get all particle positions (NxD)
+        positions = np.array([p.position for p in pso_object.particles])
+
+        objectives = np.array([p.fitness for p in pso_object.particles])
+        pareto_objectives = np.array([p.fitness for p in pso_object.pareto_front])
+
+        if target_point_id is None or target_point_id < 0 or target_point_id >= len(objectives):
+            target_point_id = 0
+
+        # Filter particles by parameter 0 range slider
+        if param0_range is not None and len(param0_range) == 2:
+            mask = (positions[:, 0] >= param0_range[0]) & (positions[:, 0] <= param0_range[1])
+            filtered_objectives = objectives[mask]
+            filtered_pareto_objectives = pareto_objectives 
+        else:
+            filtered_objectives = objectives
+            filtered_pareto_objectives = pareto_objectives
+
+        fig = create_scatter_matrix(filtered_objectives, filtered_pareto_objectives, target_point_id)
+
+        return fig
+
+    except Exception as e:
+        return {}
 
 
 if __name__ == '__main__':
