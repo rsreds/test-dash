@@ -13,11 +13,13 @@ app.title = "PSO Visualization"
 pso_data = {
     'objectives': None,
     'pareto_objectives': None,
+    'pareto_positions': None,
     'positions': None,
     'lb': None,
     'ub': None,
     'filename': None,
-    'param_names': None
+    'param_names': None,
+    'objective_names': None
 }
 
 app.layout = html.Div([
@@ -47,6 +49,7 @@ app.layout = html.Div([
     
     dcc.Graph(id='main-plot', style={'margin': 'auto', 'width': '90%'}),
     
+    #slider container
     html.Div(id='slider-container', style={'margin': '20px', 'display': 'none'})
 ])
 
@@ -91,12 +94,13 @@ def create_scatter_matrix(objectives, pareto_objectives, target_point_id=0):
                     row=row, col=col
                 )
                 # Pareto front
-                fig.add_trace(
-                    go.Scatter(x=pareto_objectives[:, j], y=pareto_objectives[:, i], mode='markers',
-                              marker=dict(size=6, color='blue', opacity=0.7),
-                              name='Pareto Front', showlegend=(i == 0 and j == 1)),
-                    row=row, col=col
-                )
+                if len(pareto_objectives) > 0:
+                    fig.add_trace(
+                        go.Scatter(x=pareto_objectives[:, j], y=pareto_objectives[:, i], mode='markers',
+                                  marker=dict(size=6, color='blue', opacity=0.7),
+                                  name='Pareto Front', showlegend=(i == 0 and j == 1)),
+                        row=row, col=col
+                    )
                 # Target point
                 fig.add_trace(
                     go.Scatter(x=[target_point[j]], y=[target_point[i]], mode='markers',
@@ -114,12 +118,12 @@ def create_scatter_matrix(objectives, pareto_objectives, target_point_id=0):
     )
     return fig
 
-def create_slider_component(param_index, param_name, param_min, param_max):
+def create_parameter_slider(param_index, param_name, param_min, param_max):
     """Create a single slider component for a parameter"""
     slider_marks = {param_min: f'{param_min:.1f}', param_max: f'{param_max:.1f}'}
     
     return html.Div([
-        html.P(f"Filter by {param_name}:", style={'marginBottom': '5px', 'marginTop': '15px'}),
+        html.P(f"Filter Pareto Front by {param_name}:", style={'marginBottom': '5px', 'marginTop': '15px'}),
         dcc.RangeSlider(
             id={'type': 'param-slider', 'index': param_index},
             min=param_min,
@@ -132,6 +136,25 @@ def create_slider_component(param_index, param_name, param_min, param_max):
         )
     ])
 
+def create_objective_slider(obj_index, obj_name, obj_min, obj_max):
+    """Create a single slider component for an objective"""
+    slider_marks = {obj_min: f'{obj_min:.1f}', obj_max: f'{obj_max:.1f}'}
+    
+    return html.Div([
+        html.P(f"Filter Pareto Front by {obj_name}:", style={'marginBottom': '5px', 'marginTop': '15px'}),
+        dcc.RangeSlider(
+            id={'type': 'obj-slider', 'index': obj_index},
+            min=obj_min,
+            max=obj_max,
+            step=(obj_max - obj_min) / 100 if obj_max > obj_min else 0.01,
+            value=[obj_min, obj_max],
+            marks=slider_marks,
+            tooltip={"placement": "bottom", "always_visible": False},
+            updatemode='drag'
+        )
+    ])
+
+# Callback to load and process file
 @app.callback(
     [Output('file-info', 'children'),
      Output('slider-container', 'children'),
@@ -155,18 +178,27 @@ def process_file(contents, filename):
         # Store data globally
         pso_data['objectives'] = np.array([p.fitness for p in pso_object.particles])
         pso_data['pareto_objectives'] = np.array([p.fitness for p in pso_object.pareto_front])
+        pso_data['pareto_positions'] = np.array([p.position for p in pso_object.pareto_front]) 
         pso_data['positions'] = np.array([p.position for p in pso_object.particles])
         pso_data['lb'] = pso_object.lower_bounds
         pso_data['ub'] = pso_object.upper_bounds
         pso_data['filename'] = filename
         
-        # Extract parameter names
+        # Extract parameter names from PSO object
         num_params = len(pso_object.lower_bounds)
         param_names = getattr(pso_object, 'param_names', None)
         if param_names is None or len(param_names) != num_params:
             param_names = [f'Parameter {i}' for i in range(num_params)]
         
         pso_data['param_names'] = param_names
+        
+        # Create objective names
+        num_objectives = pso_data['objectives'].shape[1]
+        obj_names = getattr(pso_object, 'objective_names', None)
+        if obj_names is None or len(obj_names) != num_objectives:
+            obj_names = [f'Objective {i+1}' for i in range(num_objectives)]
+        
+        pso_data['objective_names'] = obj_names
         
         # Create info display
         info_text = html.Div([
@@ -177,19 +209,31 @@ def process_file(contents, filename):
             html.P(f"Pareto front: {len(pso_data['pareto_objectives'])}")
         ])
         
-        # Create sliders dynamically for all parameters
+        # Create sliders
         slider_components = []
+        
+        # Add parameter sliders
+        slider_components.append(html.H4("Parameter Filters:", style={'marginTop': '20px', 'marginBottom': '10px'}))
         for i, param_name in enumerate(pso_data['param_names']):
             param_min = float(pso_data['lb'][i])
             param_max = float(pso_data['ub'][i])
             slider_components.append(
-                create_slider_component(i, param_name, param_min, param_max)
+                create_parameter_slider(i, param_name, param_min, param_max)
+            )
+        
+        # Add objective sliders
+        slider_components.append(html.H4("Objective Filters:", style={'marginTop': '30px', 'marginBottom': '10px'}))
+        for i, obj_name in enumerate(pso_data['objective_names']):
+            obj_min = float(np.min(pso_data['pareto_objectives'][:, i]))
+            obj_max = float(np.max(pso_data['pareto_objectives'][:, i]))
+            slider_components.append(
+                create_objective_slider(i, obj_name, obj_min, obj_max)
             )
         
         return (info_text,
                 slider_components,
-                {'margin': '20px', 'display': 'block'}, 
-                {'margin': '20px', 'textAlign': 'center', 'display': 'block'}) 
+                {'margin': '20px', 'display': 'block'},  # Show slider container
+                {'margin': '20px', 'textAlign': 'center', 'display': 'block'})  # Show target input
                 
     except Exception as e:
         error_msg = html.P(f"Error: {str(e)}", style={'color': 'red'})
@@ -199,39 +243,50 @@ def process_file(contents, filename):
 @app.callback(
     Output('main-plot', 'figure'),
     [Input({'type': 'param-slider', 'index': ALL}, 'value'),
+     Input({'type': 'obj-slider', 'index': ALL}, 'value'),
      Input('target-input', 'value')],
     prevent_initial_call=True
 )
-def update_plot(slider_values, target_id):
+def update_plot(param_slider_values, obj_slider_values, target_id):
     global pso_data
     
     # Check if data is loaded
     if pso_data['objectives'] is None:
         return {}
     
-    # Start with all particles
-    mask = np.ones(len(pso_data['positions']), dtype=bool)
+    # Start with all Pareto front points
+    pareto_mask = np.ones(len(pso_data['pareto_positions']), dtype=bool)
     
-    # Apply filters for all parameters
-    for i, slider_range in enumerate(slider_values):
-        if slider_range and len(slider_range) == 2 and i < pso_data['positions'].shape[1]:
+    # Apply parameter filters to Pareto front points
+    for i, slider_range in enumerate(param_slider_values):
+        if slider_range and len(slider_range) == 2 and i < pso_data['pareto_positions'].shape[1]:
             low, high = slider_range
-            param_mask = (pso_data['positions'][:, i] >= low) & (pso_data['positions'][:, i] <= high)
-            mask = mask & param_mask
+            param_mask = (pso_data['pareto_positions'][:, i] >= low) & (pso_data['pareto_positions'][:, i] <= high)
+            pareto_mask = pareto_mask & param_mask
     
-    # Apply combined filter
-    filtered_objectives = pso_data['objectives'][mask]
+    # Apply objective filters to Pareto front points
+    for i, slider_range in enumerate(obj_slider_values):
+        if slider_range and len(slider_range) == 2 and i < pso_data['pareto_objectives'].shape[1]:
+            low, high = slider_range
+            obj_mask = (pso_data['pareto_objectives'][:, i] >= low) & (pso_data['pareto_objectives'][:, i] <= high)
+            pareto_mask = pareto_mask & obj_mask
     
-    # Handle empty filtered data
-    if len(filtered_objectives) == 0:
-        return {}
+    # Filter only the Pareto front
+    filtered_pareto_objectives = pso_data['pareto_objectives'][pareto_mask]
+    
+    # Keep ALL grey points unfiltered
+    all_objectives = pso_data['objectives']
+    
+    # Handle empty filtered Pareto data
+    if len(filtered_pareto_objectives) == 0:
+        filtered_pareto_objectives = np.empty((0, pso_data['pareto_objectives'].shape[1]))
     
     # Validate target ID
-    if target_id is None or target_id >= len(filtered_objectives) or target_id < 0:
+    if target_id is None or target_id >= len(all_objectives) or target_id < 0:
         target_id = 0
     
-    # Create plot
-    fig = create_scatter_matrix(filtered_objectives, pso_data['pareto_objectives'], target_id)
+    # Create plot with unfiltered grey points and filtered blue points
+    fig = create_scatter_matrix(all_objectives, filtered_pareto_objectives, target_id)
     return fig
 
 if __name__ == '__main__':
