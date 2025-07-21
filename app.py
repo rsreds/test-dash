@@ -44,12 +44,11 @@ def filter_pareto_front(points):
             is_pareto[i] = True
     return is_pareto
 
-# Changed to accept full_objectives for all points (grey), and pareto_objectives for filtered blue points
 def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0):
     num_obj = full_objectives.shape[1]
     obj_names = pso_data['obj_names']
 
-    if target_point_id >= len(full_objectives):
+    if target_point_id >= len(full_objectives) or target_point_id < 0:
         target_point_id = 0
 
     target_point = full_objectives[target_point_id]
@@ -70,46 +69,58 @@ def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0)
             row, col = i + 1, j + 1
 
             if i == j:
+                # Diagonal cells: just show objective name as text
                 fig.add_trace(
-                    go.Scatter(x=[0.5], y=[0.5], mode='text', text=[obj_names[i]],
-                               textfont=dict(size=16), showlegend=False, hoverinfo='none'),
+                    go.Scatter(
+                        x=[0.5], y=[0.5], mode='text', text=[obj_names[i]],
+                        textfont=dict(size=16), showlegend=False, hoverinfo='none'
+                    ),
                     row=row, col=col
                 )
                 fig.update_xaxes(range=[0, 1], showticklabels=False, row=row, col=col)
                 fig.update_yaxes(range=[0, 1], showticklabels=False, row=row, col=col)
             else:
-                # Plot all points in grey (full dataset, unfiltered) - CHANGED
+                # Plot all points in grey (full dataset, unfiltered) - CHANGED: always plot all points
                 fig.add_trace(
-                    go.Scatter(x=full_objectives[:, j], y=full_objectives[:, i], mode='markers',
-                               marker=dict(size=4, color='grey', opacity=0.5),
-                               name='All Points', showlegend=(i == 0 and j == 1)),
+                    go.Scatter(
+                        x=full_objectives[:, j], y=full_objectives[:, i], mode='markers',
+                        marker=dict(size=4, color='grey', opacity=0.5),
+                        name='All Points', showlegend=(i == 0 and j == 1)
+                    ),
                     row=row, col=col
                 )
                 # Plot filtered Pareto points in blue
                 if len(pareto_objectives) > 0:
                     fig.add_trace(
-                        go.Scatter(x=pareto_objectives[:, j], y=pareto_objectives[:, i], mode='markers',
-                                   marker=dict(size=6, color='blue', opacity=0.7),
-                                   name='Pareto Front', showlegend=(i == 0 and j == 1)),
+                        go.Scatter(
+                            x=pareto_objectives[:, j], y=pareto_objectives[:, i], mode='markers',
+                            marker=dict(size=6, color='blue', opacity=0.7),
+                            name='Pareto Front', showlegend=(i == 0 and j == 1)
+                        ),
                         row=row, col=col
                     )
                 # Plot target point in red
                 fig.add_trace(
-                    go.Scatter(x=[target_point[j]], y=[target_point[i]], mode='markers',
-                               marker=dict(size=10, color='red', symbol='star'),
-                               name=f'Point {target_point_id}', showlegend=(i == 0 and j == 1)),
+                    go.Scatter(
+                        x=[target_point[j]], y=[target_point[i]], mode='markers',
+                        marker=dict(size=10, color='red', symbol='star'),
+                        name=f'Point {target_point_id}', showlegend=(i == 0 and j == 1)
+                    ),
                     row=row, col=col
                 )
                 fig.update_xaxes(title_text=obj_names[j], row=row, col=col)
                 fig.update_yaxes(title_text=obj_names[i], row=row, col=col)
 
-    # Force axis ranges to full data range so grey points are always visible - CHANGED
+    # FIXED: Properly set axis ranges per subplot (x-axis corresponds to j, y-axis corresponds to i)
     for i in range(num_obj):
-        x_min = np.min(full_objectives[:, i])
-        x_max = np.max(full_objectives[:, i])
         for j in range(num_obj):
-            fig.update_xaxes(range=[x_min, x_max], row=i+1, col=j+1)
-            fig.update_yaxes(range=[x_min, x_max], row=j+1, col=i+1)
+            if i != j:
+                x_min = np.min(full_objectives[:, j])
+                x_max = np.max(full_objectives[:, j])
+                y_min = np.min(full_objectives[:, i])
+                y_max = np.max(full_objectives[:, i])
+                fig.update_xaxes(range=[x_min, x_max], row=i + 1, col=j + 1)
+                fig.update_yaxes(range=[y_min, y_max], row=i + 1, col=j + 1)
 
     fig.update_layout(
         title=f'{num_obj}×{num_obj} Scatter Plot Matrix',
@@ -200,6 +211,7 @@ def load_csv(contents, filename):
             html.P(f"Pareto Front Points: {len(pso_data['pareto_objectives'])}")
         ])
 
+        # Show slider and target input containers when file is loaded
         return file_info, sliders, {'margin': '20px', 'display': 'block'}, {'margin': '20px', 'textAlign': 'center', 'display': 'block'}
 
     except Exception as e:
@@ -234,7 +246,7 @@ def update_plot(param_slider_values, obj_slider_values, target_id):
     if target_id is None or target_id >= len(pso_data['objectives']) or target_id < 0:
         target_id = 0
 
-    # Changed to pass all objectives for grey points, filtered objectives for blue points
+    # Pass all objectives for grey points, filtered objectives for blue points
     return create_scatter_matrix(pso_data['objectives'], filtered_objectives, target_id)
 
 if __name__ == '__main__':
