@@ -38,6 +38,9 @@ def create_slider(title, slider_id, min_val, max_val):
     ])
 
 def filter_pareto_front(points):
+    if len(points) == 0: 
+        return np.array([], dtype=bool)
+    
     is_pareto = np.ones(points.shape[0], dtype=bool)
     for i, c in enumerate(points):
         if is_pareto[i]:
@@ -104,13 +107,14 @@ def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0,
                 fig.update_xaxes(title_text=obj_names[j], row=row, col=col)
                 fig.update_yaxes(title_text=obj_names[i], row=row, col=col)
 
-    # Fix axis ranges if provided (on file load)
+    # Fix axis ranges
     if fixed_axis_ranges is not None:
         obj_mins, obj_maxs = fixed_axis_ranges
         for i in range(num_obj):
             for j in range(num_obj):
-                fig.update_xaxes(range=[obj_mins[j], obj_maxs[j]], row=i+1, col=j+1)
-                fig.update_yaxes(range=[obj_mins[i], obj_maxs[i]], row=i+1, col=j+1)
+                if i != j:
+                    fig.update_xaxes(range=[obj_mins[j], obj_maxs[j]], row=i+1, col=j+1)
+                    fig.update_yaxes(range=[obj_mins[i], obj_maxs[i]], row=i+1, col=j+1)
 
     fig.update_layout(
         title=f'{num_obj}×{num_obj} Scatter Plot Matrix',
@@ -166,13 +170,27 @@ def load_csv(contents, filename):
         decoded = base64.b64decode(content_string)
         df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
 
-        param_data = df.iloc[:, :-3].values
-        obj_data = df.iloc[:, -3:].values
+        columns = df.columns.tolist()
+        
+        # Find parameter columns
+        param_cols = [col for col in columns if col.startswith('param_')]
+        
+        # Find objective columns
+        obj_cols = [col for col in columns if col.startswith('objective_')]
 
         pso_data['parameters'] = param_data
         pso_data['objectives'] = obj_data
-        pso_data['param_names'] = df.columns[:-3].tolist()
-        pso_data['obj_names'] = df.columns[-3:].tolist()
+        pso_data['param_names'] = param_names
+        pso_data['obj_names'] = obj_names
+        pso_data['filename'] = filename
+        
+        #Calculate bounds
+        pso_data['lb'] = np.min(param_data, axis=0) if len(param_data) > 0 else []
+        pso_data['ub'] = np.max(param_data, axis=0) if len(param_data) > 0 else []
+        
+        #Get counts
+        num_params = len(param_names)
+        num_objectives = len(obj_names)
         pso_data['filename'] = filename
 
         # Store global min/max for each objective
@@ -185,23 +203,26 @@ def load_csv(contents, filename):
 
         sliders = []
 
-        sliders.append(html.H4("Parameter Filters:", style={'marginTop': '20px'}))
-        for i, name in enumerate(pso_data['param_names']):
-            min_val = float(np.min(param_data[:, i]))
-            max_val = float(np.max(param_data[:, i]))
-            sliders.append(create_slider(name, {'type': 'param-slider', 'index': i}, min_val, max_val))
+        # Parameter sliders
+        if num_params > 0:
+            sliders.append(html.H4("Parameter Filters:", style={'marginTop': '20px'}))
+            for i, name in enumerate(param_names):
+                param_min = float(pso_data['lb'][i])
+                param_max = float(pso_data['ub'][i])
+                sliders.append(create_slider(name, {'type': 'param-slider', 'index': i}, param_min, param_max))
 
+        # Objective sliders
         sliders.append(html.H4("Objective Filters:", style={'marginTop': '30px'}))
-        for i, name in enumerate(pso_data['obj_names']):
-            min_val = float(np.min(pso_data['pareto_objectives'][:, i]))
-            max_val = float(np.max(pso_data['pareto_objectives'][:, i]))
-            sliders.append(create_slider(name, {'type': 'obj-slider', 'index': i}, min_val, max_val))
+        for i, name in enumerate(obj_names):
+            obj_min = float(np.min(pso_data['pareto_objectives'][:, i]))
+            obj_max = float(np.max(pso_data['pareto_objectives'][:, i]))
+            sliders.append(create_slider(name, {'type': 'obj-slider', 'index': i}, obj_min, obj_max))
 
         file_info = html.Div([
             html.P(f"File: {filename}"),
             html.P(f"Rows: {len(df)}"),
-            html.P(f"Parameters: {len(pso_data['param_names'])}"),
-            html.P(f"Objectives: {len(pso_data['obj_names'])}"),
+            html.P(f"Parameters: {num_params}"),
+            html.P(f"Objectives: {num_objectives}"),
             html.P(f"Pareto Front Points: {len(pso_data['pareto_objectives'])}")
         ])
 
@@ -235,14 +256,14 @@ def update_main_plot(contents, param_slider_values, obj_slider_values, target_id
     mask = np.ones(len(pso_data['pareto_objectives']), dtype=bool)
 
     for i, slider_range in enumerate(param_slider_values):
-        low, high = slider_range
-        mask &= (pso_data['pareto_positions'][:, i] >= low) & (pso_data['pareto_positions'][:, i] <= high)
+        if i < len(pso_data.get('param_names', [])):
+            mask &= (pso_data['pareto_positions'][:, i] >= low) & (pso_data['pareto_positions'][:, i] <= high)
 
     for i, slider_range in enumerate(obj_slider_values):
-        low, high = slider_range
-        mask &= (pso_data['pareto_objectives'][:, i] >= low) & (pso_data['pareto_objectives'][:, i] <= high)
+        if i < len(pso_data.get('obj_names', [])): 
+            low, high = slider_range
+            mask &= (pso_data['pareto_objectives'][:, i] >= low) & (pso_data['pareto_objectives'][:, i] <= high)
 
-    filtered_positions = pso_data['pareto_positions'][mask]
     filtered_objectives = pso_data['pareto_objectives'][mask]
 
     if len(filtered_objectives) == 0:
@@ -255,4 +276,3 @@ def update_main_plot(contents, param_slider_values, obj_slider_values, target_id
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080, debug=True)
-
