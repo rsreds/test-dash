@@ -15,7 +15,6 @@ RUN pip install --no-cache-dir \
     numpy \
     pandas \
     plotly \
-    dill\
     dash \
     TheOptimizer\
     dash-bootstrap-components
