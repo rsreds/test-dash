@@ -4,22 +4,22 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from dash import Dash, html, dcc, Input, Output, State, ALL, callback_context
+from dash import Dash, html, dcc, Input, Output, State, ALL
 
 app = Dash(__name__)
 app.title = "CSV PSO Visualizer"
 
 # Global storage for PSO data
 pso_data = {
-    'parameters': None,
-    'objectives': None,
-    'pareto_objectives': None,
-    'pareto_positions': None,
+    'parameters': np.empty((0, 0)),
+    'objectives': np.empty((0, 0)),
+    'pareto_objectives': np.empty((0, 0)),
+    'pareto_positions': np.empty((0, 0)),
     'param_names': [],
     'obj_names': [],
     'filename': None,
-    'obj_mins': None,  # Store min of objectives for fixed axis
-    'obj_maxs': None   # Store max of objectives for fixed axis
+    'obj_mins': [],
+    'obj_maxs': []
 }
 
 def create_slider(title, slider_id, min_val, max_val):
@@ -46,7 +46,7 @@ def filter_pareto_front(points):
             is_pareto[i] = True
     return is_pareto
 
-def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0, fixed_axis_ranges=None):
+def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0):
     num_obj = full_objectives.shape[1]
     obj_names = pso_data['obj_names']
 
@@ -79,14 +79,12 @@ def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0,
                 fig.update_xaxes(range=[0, 1], showticklabels=False, row=row, col=col)
                 fig.update_yaxes(range=[0, 1], showticklabels=False, row=row, col=col)
             else:
-                # Plot all points (full dataset, unfiltered) in grey
                 fig.add_trace(
                     go.Scatter(x=full_objectives[:, j], y=full_objectives[:, i], mode='markers',
                                marker=dict(size=4, color='grey', opacity=0.5),
                                name='All Points', showlegend=(i == 0 and j == 1)),
                     row=row, col=col
                 )
-                # Plot filtered Pareto points in blue
                 if len(pareto_objectives) > 0:
                     fig.add_trace(
                         go.Scatter(x=pareto_objectives[:, j], y=pareto_objectives[:, i], mode='markers',
@@ -94,7 +92,6 @@ def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0,
                                    name='Pareto Front', showlegend=(i == 0 and j == 1)),
                         row=row, col=col
                     )
-                # Plot target point in red
                 fig.add_trace(
                     go.Scatter(x=[target_point[j]], y=[target_point[i]], mode='markers',
                                marker=dict(size=10, color='red', symbol='star'),
@@ -104,13 +101,12 @@ def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0,
                 fig.update_xaxes(title_text=obj_names[j], row=row, col=col)
                 fig.update_yaxes(title_text=obj_names[i], row=row, col=col)
 
-    # Fix axis ranges if provided (on file load)
-    if fixed_axis_ranges is not None:
-        obj_mins, obj_maxs = fixed_axis_ranges
-        for i in range(num_obj):
-            for j in range(num_obj):
-                fig.update_xaxes(range=[obj_mins[j], obj_maxs[j]], row=i+1, col=j+1)
-                fig.update_yaxes(range=[obj_mins[i], obj_maxs[i]], row=i+1, col=j+1)
+    for i in range(num_obj):
+        x_min = pso_data['obj_mins'][i]
+        x_max = pso_data['obj_maxs'][i]
+        for j in range(num_obj):
+            fig.update_xaxes(range=[x_min, x_max], row=i+1, col=j+1)
+            fig.update_yaxes(range=[x_min, x_max], row=j+1, col=i+1)
 
     fig.update_layout(
         title=f'{num_obj}×{num_obj} Scatter Plot Matrix',
@@ -175,7 +171,6 @@ def load_csv(contents, filename):
         pso_data['obj_names'] = df.columns[-3:].tolist()
         pso_data['filename'] = filename
 
-        # Store global min/max for each objective (for fixed axis ranges)
         pso_data['obj_mins'] = np.min(obj_data, axis=0)
         pso_data['obj_maxs'] = np.max(obj_data, axis=0)
 
@@ -212,28 +207,12 @@ def load_csv(contents, filename):
 
 @app.callback(
     Output('main-plot', 'figure'),
-    [Input('upload-data', 'contents'),
-     Input({'type': 'param-slider', 'index': ALL}, 'value'),
+    [Input({'type': 'param-slider', 'index': ALL}, 'value'),
      Input({'type': 'obj-slider', 'index': ALL}, 'value'),
      Input('target-input', 'value')]
 )
-def update_main_plot(contents, param_slider_values, obj_slider_values, target_id):
-    # If no data loaded yet
-    if pso_data['objectives'] is None:
-        return go.Figure()
-
-    triggered = callback_context.triggered[0]['prop_id'].split('.')[0]
-
-    # On file upload, show full plot with fixed axis ranges and no filtering
-    if triggered == 'upload-data':
-        return create_scatter_matrix(
-            pso_data['objectives'],
-            pso_data['pareto_objectives'],
-            target_point_id=0,
-            fixed_axis_ranges=(pso_data['obj_mins'], pso_data['obj_maxs'])
-        )
-
-    # Otherwise, apply filters to Pareto front only
+def update_plot(param_slider_values, obj_slider_values, target_id):
+    # Debug prints at end of file (see below)
     mask = np.ones(len(pso_data['pareto_objectives']), dtype=bool)
 
     for i, slider_range in enumerate(param_slider_values):
@@ -253,8 +232,15 @@ def update_main_plot(contents, param_slider_values, obj_slider_values, target_id
     if target_id is None or target_id >= len(pso_data['objectives']) or target_id < 0:
         target_id = 0
 
-    # No fixed axis ranges on filtering to prevent zoom reset
-    return create_scatter_matrix(pso_data['objectives'], filtered_objectives, target_id)
+    fig = create_scatter_matrix(pso_data['objectives'], filtered_objectives, target_id)
+
+    # Debug prints
+    print(f"Updating plot with target_id: {target_id}")
+    print(f"Full objectives shape: {pso_data['objectives'].shape}")
+    print(f"Pareto objectives shape: {pso_data['pareto_objectives'].shape}")
+    print(f"Filtered Pareto objectives shape: {filtered_objectives.shape}")
+
+    return fig
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080, debug=True)
