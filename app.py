@@ -18,8 +18,8 @@ pso_data = {
     'param_names': [],
     'obj_names': [],
     'filename': None,
-    'obj_mins': None,  # Store min of objectives for fixed axis
-    'obj_maxs': None   # Store max of objectives for fixed axis
+    'obj_mins': None,  
+    'obj_maxs': None
 }
 
 def create_slider(title, slider_id, min_val, max_val):
@@ -258,9 +258,4 @@ def update_main_plot(contents, param_slider_values, obj_slider_values, target_id
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080, debug=True)
-
-
-
-print(f"Full objectives shape: {pso_data['objectives'].shape if pso_data['objectives'] is not None else None}")
-print(f"Pareto objectives shape: {pso_data['pareto_objectives'].shape if pso_data['pareto_objectives'] is not None else None}")
 
