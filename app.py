@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from dash import Dash, html, dcc, Input, Output, State, ctx
+from dash import Dash, html, dcc, Input, Output, State, ALL
 
 app = Dash(__name__)
 app.title = "CSV pso Visualizer"
@@ -152,4 +152,4 @@ def update_plot(slider_values):
     return fig
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run(debug=True)
