@@ -17,7 +17,9 @@ pso_data = {
     'pareto_positions': None,
     'param_names': [],
     'obj_names': [],
-    'filename': None
+    'filename': None,
+    'obj_mins': None,  # store objective mins
+    'obj_maxs': None,  # store objective maxs
 }
 
 def create_slider(title, slider_id, min_val, max_val):
@@ -44,7 +46,7 @@ def filter_pareto_front(points):
             is_pareto[i] = True
     return is_pareto
 
-def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0):
+def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0, fixed_axis_ranges=None):
     num_obj = full_objectives.shape[1]
     obj_names = pso_data['obj_names']
 
@@ -69,27 +71,24 @@ def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0)
             row, col = i + 1, j + 1
 
             if i == j:
-                # Diagonal cells: just show objective name as text
                 fig.add_trace(
-                    go.Scatter(
-                        x=[0.5], y=[0.5], mode='text', text=[obj_names[i]],
-                        textfont=dict(size=16), showlegend=False, hoverinfo='none'
-                    ),
+                    go.Scatter(x=[0.5], y=[0.5], mode='text', text=[obj_names[i]],
+                               textfont=dict(size=16), showlegend=False, hoverinfo='none'),
                     row=row, col=col
                 )
                 fig.update_xaxes(range=[0, 1], showticklabels=False, row=row, col=col)
                 fig.update_yaxes(range=[0, 1], showticklabels=False, row=row, col=col)
             else:
-                # Plot all points in grey (full dataset, unfiltered) - CHANGED: always plot all points
+                # All points in grey (full dataset, unfiltered)
                 fig.add_trace(
                     go.Scatter(
                         x=full_objectives[:, j], y=full_objectives[:, i], mode='markers',
-                        marker=dict(size=4, color='grey', opacity=0.5),
+                        marker=dict(size=6, color='grey', opacity=0.8),
                         name='All Points', showlegend=(i == 0 and j == 1)
                     ),
                     row=row, col=col
                 )
-                # Plot filtered Pareto points in blue
+                # Filtered Pareto points in blue
                 if len(pareto_objectives) > 0:
                     fig.add_trace(
                         go.Scatter(
@@ -99,11 +98,11 @@ def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0)
                         ),
                         row=row, col=col
                     )
-                # Plot target point in red
+                # Target point in red star
                 fig.add_trace(
                     go.Scatter(
                         x=[target_point[j]], y=[target_point[i]], mode='markers',
-                        marker=dict(size=10, color='red', symbol='star'),
+                        marker=dict(size=8, color='red', symbol='star'),
                         name=f'Point {target_point_id}', showlegend=(i == 0 and j == 1)
                     ),
                     row=row, col=col
@@ -111,16 +110,12 @@ def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0)
                 fig.update_xaxes(title_text=obj_names[j], row=row, col=col)
                 fig.update_yaxes(title_text=obj_names[i], row=row, col=col)
 
-    # FIXED: Properly set axis ranges per subplot (x-axis corresponds to j, y-axis corresponds to i)
-    for i in range(num_obj):
-        for j in range(num_obj):
-            if i != j:
-                x_min = np.min(full_objectives[:, j])
-                x_max = np.max(full_objectives[:, j])
-                y_min = np.min(full_objectives[:, i])
-                y_max = np.max(full_objectives[:, i])
-                fig.update_xaxes(range=[x_min, x_max], row=i + 1, col=j + 1)
-                fig.update_yaxes(range=[y_min, y_max], row=i + 1, col=j + 1)
+            # Set fixed axis ranges only on initial plot load
+            if fixed_axis_ranges is not None and i != j:
+                x_min, x_max = fixed_axis_ranges[0][j], fixed_axis_ranges[1][j]
+                y_min, y_max = fixed_axis_ranges[0][i], fixed_axis_ranges[1][i]
+                fig.update_xaxes(range=[x_min, x_max], row=row, col=col)
+                fig.update_yaxes(range=[y_min, y_max], row=row, col=col)
 
     fig.update_layout(
         title=f'{num_obj}×{num_obj} Scatter Plot Matrix',
@@ -185,9 +180,14 @@ def load_csv(contents, filename):
         pso_data['obj_names'] = df.columns[-3:].tolist()
         pso_data['filename'] = filename
 
+        # Calculate pareto front mask and filtered data
         pareto_mask = filter_pareto_front(obj_data)
         pso_data['pareto_objectives'] = obj_data[pareto_mask]
         pso_data['pareto_positions'] = param_data[pareto_mask]
+
+        # Store global axis min and max for objectives (for fixed initial zoom)
+        pso_data['obj_mins'] = np.min(obj_data, axis=0)
+        pso_data['obj_maxs'] = np.max(obj_data, axis=0)
 
         sliders = []
 
@@ -211,11 +211,25 @@ def load_csv(contents, filename):
             html.P(f"Pareto Front Points: {len(pso_data['pareto_objectives'])}")
         ])
 
-        # Show slider and target input containers when file is loaded
         return file_info, sliders, {'margin': '20px', 'display': 'block'}, {'margin': '20px', 'textAlign': 'center', 'display': 'block'}
 
     except Exception as e:
         return html.P(f"Error loading file: {e}"), [], {'display': 'none'}, {'display': 'none'}
+
+@app.callback(
+    Output('main-plot', 'figure'),
+    Input('upload-data', 'contents')
+)
+def initial_plot(contents):
+    # Plot with fixed axis ranges on initial load
+    if contents is None or pso_data['objectives'] is None:
+        return go.Figure()
+    return create_scatter_matrix(
+        pso_data['objectives'], 
+        pso_data['pareto_objectives'],
+        target_point_id=0,
+        fixed_axis_ranges=(pso_data['obj_mins'], pso_data['obj_maxs'])
+    )
 
 @app.callback(
     Output('main-plot', 'figure'),
@@ -246,7 +260,7 @@ def update_plot(param_slider_values, obj_slider_values, target_id):
     if target_id is None or target_id >= len(pso_data['objectives']) or target_id < 0:
         target_id = 0
 
-    # Pass all objectives for grey points, filtered objectives for blue points
+    # No fixed_axis_ranges here to prevent zoom reset on slider changes
     return create_scatter_matrix(pso_data['objectives'], filtered_objectives, target_id)
 
 if __name__ == '__main__':
