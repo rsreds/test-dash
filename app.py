@@ -177,6 +177,15 @@ def load_csv(contents, filename):
         
         # Find objective columns
         obj_cols = [col for col in columns if col.startswith('objective_')]
+        
+        if not param_cols or not obj_cols:
+            raise ValueError(f"CSV must contain columns starting with 'param_' and 'objective_'. Found params: {param_cols}, Found objectives: {obj_cols}")
+
+        # Extract the data
+        param_data = df[param_cols].values
+        obj_data = df[obj_cols].values
+        param_names = param_cols
+        obj_names = obj_cols
 
         pso_data['parameters'] = param_data
         pso_data['objectives'] = obj_data
@@ -191,7 +200,6 @@ def load_csv(contents, filename):
         #Get counts
         num_params = len(param_names)
         num_objectives = len(obj_names)
-        pso_data['filename'] = filename
 
         # Store global min/max for each objective
         pso_data['obj_mins'] = np.min(obj_data, axis=0)
@@ -255,10 +263,13 @@ def update_main_plot(contents, param_slider_values, obj_slider_values, target_id
 
     mask = np.ones(len(pso_data['pareto_objectives']), dtype=bool)
 
+    # Filter by parameters
     for i, slider_range in enumerate(param_slider_values):
         if i < len(pso_data.get('param_names', [])):
+            low, high = slider_range
             mask &= (pso_data['pareto_positions'][:, i] >= low) & (pso_data['pareto_positions'][:, i] <= high)
 
+    # Filter by objectives
     for i, slider_range in enumerate(obj_slider_values):
         if i < len(pso_data.get('obj_names', [])): 
             low, high = slider_range
