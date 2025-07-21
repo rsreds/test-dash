@@ -19,18 +19,7 @@ pso_data = {
     'obj_names': []
 }
 
-def create_range_slider_component(name, min_val, max_val, step=0.01):
-    return html.Div([
-        html.Label(f'{name} Range:'),
-        dcc.RangeSlider(
-            id={'type': 'dynamic-slider', 'index': name},
-            min=min_val,
-            max=max_val,
-            step=step,
-            value=[min_val, max_val],
-            tooltip={"placement": "bottom", "always_visible": True}
-        )
-    ], style={'margin': '10px'})
+# --- Helper functions ---
 
 def filter_pareto_front(points):
     """
@@ -45,129 +34,203 @@ def filter_pareto_front(points):
             is_pareto[i] = True 
     return is_pareto
 
+def create_param_slider_component(index, name, min_val, max_val):
+    marks = {min_val: f"{min_val:.2f}", max_val: f"{max_val:.2f}"}
+    step = (max_val - min_val) / 100 if max_val > min_val else 0.01
+    return html.Div([
+        html.P(f"Filter by {name}:", style={'marginBottom': '5px', 'marginTop': '15px'}),
+        dcc.RangeSlider(
+            id={'type': 'param-slider', 'index': index},
+            min=min_val,
+            max=max_val,
+            step=step,
+            value=[min_val, max_val],
+            marks=marks,
+            tooltip={"placement": "bottom", "always_visible": False},
+            updatemode='drag'
+        )
+    ])
+
+def create_objective_slider_component(index, name, min_val, max_val):
+    marks = {min_val: f"{min_val:.2f}", max_val: f"{max_val:.2f}"}
+    step = (max_val - min_val) / 100 if max_val > min_val else 0.01
+    return html.Div([
+        html.P(f"Filter by {name}:", style={'marginBottom': '5px', 'marginTop': '15px'}),
+        dcc.RangeSlider(
+            id={'type': 'objective-slider', 'index': index},
+            min=min_val,
+            max=max_val,
+            step=step,
+            value=[min_val, max_val],
+            marks=marks,
+            tooltip={"placement": "bottom", "always_visible": False},
+            updatemode='drag'
+        )
+    ])
+
+def create_scatter_matrix(objectives, pareto_objectives, param_names, obj_names):
+    num_objectives = objectives.shape[1]
+    
+    subplot_titles = []
+    for i in range(num_objectives):
+        for j in range(num_objectives):
+            if i == j:
+                subplot_titles.append(obj_names[i])
+            else:
+                subplot_titles.append(f'{obj_names[j]} vs {obj_names[i]}')
+    
+    fig = make_subplots(
+        rows=num_objectives, cols=num_objectives,
+        subplot_titles=subplot_titles,
+        vertical_spacing=0.08, horizontal_spacing=0.08
+    )
+    
+    for i in range(num_objectives):
+        for j in range(num_objectives):
+            row, col = i + 1, j + 1
+            
+            if i == j:
+                # Diagonal: just label, no points
+                fig.add_trace(
+                    go.Scatter(x=[0.5], y=[0.5], mode='text', text=[obj_names[i]],
+                               textfont=dict(size=16), showlegend=False, hoverinfo='none'),
+                    row=row, col=col
+                )
+                fig.update_xaxes(range=[0, 1], showticklabels=False, row=row, col=col)
+                fig.update_yaxes(range=[0, 1], showticklabels=False, row=row, col=col)
+            else:
+                # All points gray
+                fig.add_trace(
+                    go.Scatter(x=objectives[:, j], y=objectives[:, i], mode='markers',
+                               marker=dict(size=4, color='grey', opacity=0.5),
+                               name='All Points', showlegend=(i == 0 and j == 1)),
+                    row=row, col=col
+                )
+                # Pareto front blue
+                fig.add_trace(
+                    go.Scatter(x=pareto_objectives[:, j], y=pareto_objectives[:, i], mode='markers',
+                               marker=dict(size=6, color='blue', opacity=0.7),
+                               name='Pareto Front', showlegend=(i == 0 and j == 1)),
+                    row=row, col=col
+                )
+                fig.update_xaxes(title_text=obj_names[j], row=row, col=col)
+                fig.update_yaxes(title_text=obj_names[i], row=row, col=col)
+    
+    fig.update_layout(
+        title=f'{num_objectives}×{num_objectives} Scatter Plot Matrix',
+        height=num_objectives * 300,
+        showlegend=True
+    )
+    return fig
+
+# --- Layout ---
+
 app.layout = html.Div([
-    html.H1("CSV-Based PSO Visualization"),
+    html.H1("CSV-Based PSO Visualization", style={'textAlign': 'center'}),
     dcc.Upload(
         id='upload-data',
-        children=html.Div([
-            'Drag and Drop or ', html.A('Select a CSV File')
-        ]),
+        children=html.Div(['Drag and Drop or ', html.A('Select a CSV File')]),
         style={
-            'width': '100%', 'height': '60px', 'lineHeight': '60px',
-            'borderWidth': '1px', 'borderStyle': 'dashed', 'borderRadius': '5px',
-            'textAlign': 'center', 'margin': '10px'
+            'width': '50%',
+            'height': '60px',
+            'lineHeight': '60px',
+            'borderWidth': '1px',
+            'borderStyle': 'dashed',
+            'borderRadius': '5px',
+            'textAlign': 'center',
+            'margin': '20px auto'
         },
         multiple=False,
         accept='.csv'
     ),
-    html.Div(id='sliders-container'),
-    dcc.Graph(id='pareto-graph')
+    dcc.Graph(id='pareto-graph', style={'margin': 'auto', 'width': '90%', 'height': 'auto'}),
+    html.Div(id='param-slider-container', style={'margin': '20px 10%', 'maxWidth': '1000px'}),
+    html.Div(id='objective-slider-container', style={'margin': '20px 10%', 'maxWidth': '1000px'}),
 ])
 
+# --- Callbacks ---
+
 @app.callback(
-    Output('sliders-container', 'children'),
-    Output('pareto-graph', 'figure'),
-    Input('upload-data', 'contents'),
-    Input({'type': 'dynamic-slider', 'index': ALL}, 'value'),
-    State('upload-data', 'filename'),
-    prevent_initial_call=True
+    [Output('param-slider-container', 'children'),
+     Output('objective-slider-container', 'children'),
+     Output('pareto-graph', 'figure')],
+    Input('upload-data', 'contents')
 )
-def update_sliders_and_plot(contents, slider_values, filename):
-    triggered_id = ctx.triggered_id
+def process_file(contents):
+    if contents is None:
+        return [], [], go.Figure()
 
-    if triggered_id == 'upload-data':
+    content_type, content_string = contents.split(',')
+    decoded = base64.b64decode(content_string)
+    df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
 
-        if contents is None:
-            return [], go.Figure()
+    param_data = df.iloc[:, :-3].values
+    obj_data = df.iloc[:, -3:].values
 
-        content_type, content_string = contents.split(',')
-        decoded = base64.b64decode(content_string)
-        df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+    param_names = df.columns[:-3].tolist()
+    obj_names = df.columns[-3:].tolist()
 
-        param_data = df.iloc[:, :-3].values
-        obj_data = df.iloc[:, -3:].values
+    # Store globally
+    pso_data['parameters'] = param_data
+    pso_data['objectives'] = obj_data
+    pso_data['param_names'] = param_names
+    pso_data['obj_names'] = obj_names
 
-        param_names = df.columns[:-3].tolist()
-        obj_names = df.columns[-3:].tolist()
+    pareto_mask = filter_pareto_front(obj_data)
+    pso_data['pareto_objectives'] = obj_data[pareto_mask]
+    pso_data['pareto_positions'] = param_data[pareto_mask]
 
-        # Store globally
-        pso_data['parameters'] = param_data
-        pso_data['objectives'] = obj_data
-        pso_data['param_names'] = param_names
-        pso_data['obj_names'] = obj_names
+    # Create sliders
+    param_sliders = [html.H3("Parameter Filters")] + [
+        create_param_slider_component(i, name, float(np.min(param_data[:, i])), float(np.max(param_data[:, i])))
+        for i, name in enumerate(param_names)
+    ]
+    objective_sliders = [html.H3("Objective Filters")] + [
+        create_objective_slider_component(i, name, float(np.min(obj_data[:, i])), float(np.max(obj_data[:, i])))
+        for i, name in enumerate(obj_names)
+    ]
 
-        # Calculate Pareto front mask and store filtered points
-        pareto_mask = filter_pareto_front(obj_data)
-        pso_data['pareto_objectives'] = obj_data[pareto_mask]
-        pso_data['pareto_positions'] = param_data[pareto_mask]
+    # Initial figure with all Pareto front points
+    fig = create_scatter_matrix(pso_data['objectives'], pso_data['pareto_objectives'], param_names, obj_names)
 
-        # Create sliders for params and objectives
-        sliders = []
-        for i, name in enumerate(param_names + obj_names):
-            data = param_data[:, i] if i < len(param_names) else obj_data[:, i - len(param_names)]
-            sliders.append(create_range_slider_component(name, float(np.min(data)), float(np.max(data))))
-
-        # Create initial figure
-        fig = create_figure(pso_data['pareto_positions'], pso_data['pareto_objectives'], param_names, obj_names)
-
-        return sliders, fig
-
-    elif isinstance(triggered_id, dict) and triggered_id.get('type') == 'dynamic-slider':
-
-        if pso_data['pareto_objectives'] is None:
-            return dash.no_update, go.Figure()
-
-        positions = pso_data['pareto_positions']
-        objectives = pso_data['pareto_objectives']
-        param_names = pso_data['param_names']
-        obj_names = pso_data['obj_names']
-
-        # Separate slider values into param and objective filters
-        param_filters = slider_values[:len(param_names)]
-        obj_filters = slider_values[len(param_names):]
-
-        mask = np.ones(len(objectives), dtype=bool)
-        for i, (min_val, max_val) in enumerate(param_filters):
-            mask &= (positions[:, i] >= min_val) & (positions[:, i] <= max_val)
-
-        for i, (min_val, max_val) in enumerate(obj_filters):
-            mask &= (objectives[:, i] >= min_val) & (objectives[:, i] <= max_val)
-
-        filtered_positions = positions[mask]
-        filtered_objectives = objectives[mask]
-
-        fig = create_figure(filtered_positions, filtered_objectives, param_names, obj_names)
-        return dash.no_update, fig
-
-    else:
-        # Unknown trigger or no action
-        return dash.no_update, dash.no_update
+    return param_sliders, objective_sliders, fig
 
 
-def create_figure(positions, objectives, param_names, obj_names):
-    fig = make_subplots(
-        rows=len(obj_names), cols=len(obj_names),
-        subplot_titles=[f"{obj_names[j]} vs {obj_names[i]}" for i in range(len(obj_names)) for j in range(len(obj_names))]
-    )
+@app.callback(
+    Output('pareto-graph', 'figure'),
+    [Input({'type': 'param-slider', 'index': ALL}, 'value'),
+     Input({'type': 'objective-slider', 'index': ALL}, 'value')]
+)
+def update_filtered_plot(param_slider_values, objective_slider_values):
+    if pso_data['pareto_objectives'] is None:
+        return go.Figure()
 
-    for i in range(len(obj_names)):
-        for j in range(len(obj_names)):
-            if i == j:
-                fig.add_trace(go.Scatter(x=objectives[:, j], y=objectives[:, i],
-                                         mode='markers', marker=dict(color='blue'),
-                                         name='Pareto Optimal'), row=i+1, col=j+1)
-            else:
-                fig.add_trace(go.Scatter(x=objectives[:, j], y=objectives[:, i],
-                                         mode='markers', marker=dict(color='gray', opacity=0.4),
-                                         name='All Points', showlegend=(i == 0 and j == 1)),
-                              row=i+1, col=j+1)
-                fig.add_trace(go.Scatter(x=objectives[:, j], y=objectives[:, i],
-                                         mode='markers', marker=dict(color='blue'),
-                                         name='Pareto Optimal', showlegend=(i == 0 and j == 1)),
-                              row=i+1, col=j+1)
+    positions = pso_data['pareto_positions']
+    objectives = pso_data['pareto_objectives']
+    param_names = pso_data['param_names']
+    obj_names = pso_data['obj_names']
 
-    fig.update_layout(height=300 * len(obj_names), width=300 * len(obj_names),
-                      title_text="Scatter Plot Matrix of Objectives")
+    mask = np.ones(len(objectives), dtype=bool)
+
+    # Filter by params
+    for i, slider_range in enumerate(param_slider_values):
+        if slider_range and len(slider_range) == 2:
+            low, high = slider_range
+            mask &= (positions[:, i] >= low) & (positions[:, i] <= high)
+
+    # Filter by objectives
+    for i, slider_range in enumerate(objective_slider_values):
+        if slider_range and len(slider_range) == 2:
+            low, high = slider_range
+            mask &= (objectives[:, i] >= low) & (objectives[:, i] <= high)
+
+    filtered_objectives = objectives[mask]
+    filtered_positions = positions[mask]
+
+    if len(filtered_objectives) == 0:
+        return go.Figure()
+
+    fig = create_scatter_matrix(filtered_objectives, filtered_objectives, param_names, obj_names)
     return fig
 
 
