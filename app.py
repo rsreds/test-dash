@@ -79,7 +79,7 @@ def create_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0,
                 fig.update_xaxes(range=[0, 1], showticklabels=False, row=row, col=col)
                 fig.update_yaxes(range=[0, 1], showticklabels=False, row=row, col=col)
             else:
-                # Plot all points (full dataset, unfiltered) in grey
+                # Plot all points in grey
                 fig.add_trace(
                     go.Scatter(x=full_objectives[:, j], y=full_objectives[:, i], mode='markers',
                                marker=dict(size=4, color='grey', opacity=0.5),
@@ -175,7 +175,7 @@ def load_csv(contents, filename):
         pso_data['obj_names'] = df.columns[-3:].tolist()
         pso_data['filename'] = filename
 
-        # Store global min/max for each objective (for fixed axis ranges)
+        # Store global min/max for each objective
         pso_data['obj_mins'] = np.min(obj_data, axis=0)
         pso_data['obj_maxs'] = np.max(obj_data, axis=0)
 
@@ -224,7 +224,6 @@ def update_main_plot(contents, param_slider_values, obj_slider_values, target_id
 
     triggered = callback_context.triggered[0]['prop_id'].split('.')[0]
 
-    # On file upload, show full plot with fixed axis ranges and no filtering
     if triggered == 'upload-data':
         return create_scatter_matrix(
             pso_data['objectives'],
@@ -233,7 +232,6 @@ def update_main_plot(contents, param_slider_values, obj_slider_values, target_id
             fixed_axis_ranges=(pso_data['obj_mins'], pso_data['obj_maxs'])
         )
 
-    # Otherwise, apply filters to Pareto front only
     mask = np.ones(len(pso_data['pareto_objectives']), dtype=bool)
 
     for i, slider_range in enumerate(param_slider_values):
@@ -253,7 +251,6 @@ def update_main_plot(contents, param_slider_values, obj_slider_values, target_id
     if target_id is None or target_id >= len(pso_data['objectives']) or target_id < 0:
         target_id = 0
 
-    # No fixed axis ranges on filtering to prevent zoom reset
     return create_scatter_matrix(pso_data['objectives'], filtered_objectives, target_id)
 
 if __name__ == '__main__':
