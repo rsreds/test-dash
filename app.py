@@ -568,23 +568,9 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         pso_data['selected_indices'] = set()
         log_activity("Reset data to original")
         
-    # Handle click data for individual point selection
-    elif 'main-plot' in trigger and click_data and click_data.get('points'):
-        clicked_point = click_data['points'][0]
-        if 'customdata' in clicked_point:
-            point_id = clicked_point['customdata']
-            # Only handle clicks if there's no active selection (to avoid conflicts)
-            if not (selected_data and selected_data.get('points')):
-                # Toggle selection
-                if point_id in pso_data['selected_indices']:
-                    pso_data['selected_indices'].remove(point_id)
-                    log_activity(f"Deselected point #{point_id}")
-                else:
-                    pso_data['selected_indices'].add(point_id)
-                    log_activity(f"Selected point #{point_id}")
-        
+    # Handle plot interactions - prioritize drag selection over clicks
     elif 'main-plot' in trigger and selected_data and selected_data.get('points'):
-        # Handle plot selection (box select)
+        # Handle plot selection (box select) - this takes priority
         new_selection = set()
         for point in selected_data['points']:
             if 'customdata' in point:
@@ -592,6 +578,19 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         if new_selection != pso_data['selected_indices']:
             pso_data['selected_indices'] = new_selection
             log_activity(f"Selected {len(new_selection)} points via drag selection")
+    
+    elif 'main-plot' in trigger and click_data and click_data.get('points') and not (selected_data and selected_data.get('points')):
+        # Handle individual point clicks ONLY if there's no active drag selection
+        clicked_point = click_data['points'][0]
+        if 'customdata' in clicked_point:
+            point_id = clicked_point['customdata']
+            # Toggle selection
+            if point_id in pso_data['selected_indices']:
+                pso_data['selected_indices'].remove(point_id)
+                log_activity(f"Deselected point #{point_id}")
+            else:
+                pso_data['selected_indices'].add(point_id)
+                log_activity(f"Selected point #{point_id}")
 
     # Validate target_id
     if target_id is None or target_id >= len(pso_data['objectives']) or target_id < 0:
