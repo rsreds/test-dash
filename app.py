@@ -325,14 +325,14 @@ app.layout = dbc.Container([
             ], width=12)
         ], className="mb-4"),
         
-        # Main content area with extended filters sidebar
+        # Main content area with layout exactly as specified
         dbc.Row([
-            # Left side: Plot and info panels (9 columns)
+            # Left side: Main plot and info panels (9 columns)
             dbc.Col([
                 # Main plot
                 dcc.Graph(id='main-plot', style={'height': '80vh'}, config={'displayModeBar': True}),
                 
-                # Spacing between plot and info panels
+                # 20px spacing between plot and info panels
                 html.Div(style={'height': '20px'}),
                 
                 # Point info and activity log below the plot
@@ -344,7 +344,7 @@ app.layout = dbc.Container([
                                 html.Div(id='activity-panel', className="text-center")
                             ])
                         ])
-                    ], width=4),
+                    ], width=4),  # Point Info: 4 columns
                     dbc.Col([
                         dbc.Card([
                             dbc.CardBody([
@@ -353,9 +353,9 @@ app.layout = dbc.Container([
                                        style={'height': '200px', 'overflowY': 'scroll', 'fontSize': '12px'})
                             ])
                         ])
-                    ], width=8)
+                    ], width=5)  # Activity Log: 5 columns (changed from 8)
                 ])
-            ], width=9),
+            ], width=9),  # Main content: 9 columns
             
             # Right side: Filters sidebar extending full height (3 columns)
             dbc.Col([
@@ -365,7 +365,7 @@ app.layout = dbc.Container([
                         html.Div(id='slider-container')
                     ])
                 ], style={'height': 'calc(80vh + 220px + 20px)'})  # Plot height + activity log + spacing
-            ], width=3)
+            ], width=3)  # Filters: 3 columns
         ])
     ])
 ], fluid=True)
