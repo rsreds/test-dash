@@ -64,10 +64,13 @@ def filter_pareto_front(points):
             is_pareto[i] = True
     return is_pareto
 
-def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0, selected_indices=None, fixed_axis_ranges=None):
+def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0, selected_indices=None, fixed_axis_ranges=None, filter_mask=None):
     """Create interactive scatter matrix with selection capabilities"""
     if selected_indices is None:
         selected_indices = set()
+    
+    if filter_mask is None:
+        filter_mask = np.ones(len(full_objectives), dtype=bool)
     
     num_obj = full_objectives.shape[1]
     obj_names = pso_data['obj_names']
@@ -113,9 +116,18 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
                 sizes = []
                 symbols = []
                 customdata = []
+                opacities = []
                 
                 for idx in range(len(full_objectives)):
                     customdata.append(idx)
+                    
+                    # Apply filtering - make filtered points nearly invisible
+                    if not filter_mask[idx]:
+                        colors.append('lightgray')
+                        sizes.append(1)
+                        symbols.append('circle')
+                        opacities.append(0.1)
+                        continue
                     
                     # Color logic: selected > pareto > regular
                     if idx in selected_indices:
@@ -132,6 +144,8 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
                         symbols.append('star')
                     else:
                         symbols.append('circle')
+                    
+                    opacities.append(0.8)
 
                 fig.add_trace(
                     go.Scatter(
@@ -142,7 +156,7 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
                             size=sizes,
                             color=colors,
                             symbol=symbols,
-                            opacity=0.8,
+                            opacity=opacities,
                             line=dict(width=1, color='gray')
                         ),
                         customdata=customdata,
@@ -167,8 +181,20 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
         for i in range(num_obj):
             for j in range(num_obj):
                 if i != j:
-                    fig.update_xaxes(range=[obj_mins[j], obj_maxs[j]], row=i+1, col=j+1)
-                    fig.update_yaxes(range=[obj_mins[i], obj_maxs[i]], row=i+1, col=j+1)
+                    # Add padding to ranges for better visibility
+                    x_range = obj_maxs[j] - obj_mins[j]
+                    y_range = obj_maxs[i] - obj_mins[i]
+                    x_padding = x_range * 0.05  # 5% padding
+                    y_padding = y_range * 0.05  # 5% padding
+                    
+                    fig.update_xaxes(
+                        range=[obj_mins[j] - x_padding, obj_maxs[j] + x_padding], 
+                        row=i+1, col=j+1
+                    )
+                    fig.update_yaxes(
+                        range=[obj_mins[i] - y_padding, obj_maxs[i] + y_padding], 
+                        row=i+1, col=j+1
+                    )
 
     fig.update_layout(
         title=dict(
@@ -547,16 +573,18 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         clicked_point = click_data['points'][0]
         if 'customdata' in clicked_point:
             point_id = clicked_point['customdata']
-            # Toggle selection
-            if point_id in pso_data['selected_indices']:
-                pso_data['selected_indices'].remove(point_id)
-                log_activity(f"Deselected point #{point_id}")
-            else:
-                pso_data['selected_indices'].add(point_id)
-                log_activity(f"Selected point #{point_id}")
+            # Only handle clicks if there's no active selection (to avoid conflicts)
+            if not (selected_data and selected_data.get('points')):
+                # Toggle selection
+                if point_id in pso_data['selected_indices']:
+                    pso_data['selected_indices'].remove(point_id)
+                    log_activity(f"Deselected point #{point_id}")
+                else:
+                    pso_data['selected_indices'].add(point_id)
+                    log_activity(f"Selected point #{point_id}")
         
     elif 'main-plot' in trigger and selected_data and selected_data.get('points'):
-        # Handle plot selection
+        # Handle plot selection (box select)
         new_selection = set()
         for point in selected_data['points']:
             if 'customdata' in point:
@@ -569,7 +597,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
     if target_id is None or target_id >= len(pso_data['objectives']) or target_id < 0:
         target_id = 0
 
-    # Apply filters to data
+    # Apply filters to create a view of the data, but keep original indices for selection
     current_objectives = pso_data['objectives'].copy()
     current_parameters = pso_data['parameters'].copy() if len(pso_data['parameters']) > 0 else None
     filter_mask = np.ones(len(current_objectives), dtype=bool)
@@ -588,76 +616,55 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                 low, high = slider_range
                 filter_mask &= (current_objectives[:, i] >= low) & (current_objectives[:, i] <= high)
     
-    # Apply filters
-    if not np.all(filter_mask):
-        filtered_objectives = current_objectives[filter_mask]
-        # Update selected indices to match filtered data
-        old_to_new_mapping = {}
-        new_idx = 0
-        for old_idx in range(len(filter_mask)):
-            if filter_mask[old_idx]:
-                old_to_new_mapping[old_idx] = new_idx
-                new_idx += 1
-        
-        # Update selected indices
-        new_selected_indices = set()
-        for old_idx in pso_data['selected_indices']:
-            if old_idx in old_to_new_mapping:
-                new_selected_indices.add(old_to_new_mapping[old_idx])
-        selected_for_plot = new_selected_indices
-        
-        # Adjust target_id
-        if target_id in old_to_new_mapping:
-            target_for_plot = old_to_new_mapping[target_id]
-        else:
-            target_for_plot = 0
-    else:
-        filtered_objectives = current_objectives
-        selected_for_plot = pso_data['selected_indices']
-        target_for_plot = target_id
+    # For plotting, we'll use the original data but only show filtered points
+    # This way selection indices remain consistent with original data
+    filtered_objectives = current_objectives
+    selected_for_plot = pso_data['selected_indices']
+    target_for_plot = target_id
 
-    # Create the plot with filtered data
+    # Create the plot with original data but apply visual filtering
     fig = create_interactive_scatter_matrix(
         filtered_objectives, 
         pso_data.get('pareto_objectives', np.array([])), 
         target_for_plot, 
         selected_for_plot,
-        (pso_data['obj_mins'], pso_data['obj_maxs'])
+        (pso_data['obj_mins'], pso_data['obj_maxs']),
+        filter_mask  # Pass filter mask to hide filtered points
     )
 
     # Update status
     stats = {
-        'total': len(filtered_objectives),
-        'pareto': np.sum(filter_pareto_front(filtered_objectives)) if len(filtered_objectives) > 0 else 0,
-        'selected': len(selected_for_plot)
+        'total': len(pso_data['objectives']),
+        'pareto': np.sum(filter_pareto_front(pso_data['objectives'])) if len(pso_data['objectives']) > 0 else 0,
+        'selected': len(pso_data['selected_indices'])
     }
     
     status_content = dbc.Row([
         dbc.Col(html.Strong(f"Total: {stats['total']}"), width=3),
         dbc.Col(html.Strong(f"Pareto: {stats['pareto']}", style={'color': 'blue'}), width=3),
         dbc.Col(html.Strong(f"Selected: {stats['selected']}", style={'color': 'red'}), width=3),
-        dbc.Col(html.Strong(f"Target: #{target_for_plot}", style={'color': 'darkred'}), width=3)
+        dbc.Col(html.Strong(f"Target: #{target_id}", style={'color': 'darkred'}), width=3)
     ])
 
     # Update activity panel  
     activity_content = "No point information available"
-    if target_for_plot < len(filtered_objectives):
-        obj_values = filtered_objectives[target_for_plot]
-        is_pareto = filter_pareto_front(filtered_objectives)[target_for_plot] if len(filtered_objectives) > 0 else False
-        is_selected = target_for_plot in selected_for_plot
+    if target_id < len(pso_data['objectives']):
+        obj_values = pso_data['objectives'][target_id]
+        is_pareto = filter_pareto_front(pso_data['objectives'])[target_id] if len(pso_data['objectives']) > 0 else False
+        is_selected = target_id in pso_data['selected_indices']
         
         total_obj = np.sum(obj_values)
-        all_totals = np.sum(filtered_objectives, axis=1) if len(filtered_objectives) > 0 else np.array([])
+        all_totals = np.sum(pso_data['objectives'], axis=1) if len(pso_data['objectives']) > 0 else np.array([])
         rank = np.sum(all_totals < total_obj) + 1 if len(all_totals) > 0 else 1
         ideal_distance = np.sqrt(np.sum(obj_values**2))
         
         obj_display = " | ".join([f"Obj{i+1}: {val:.4f}" for i, val in enumerate(obj_values[:5])])
         
         activity_content = html.Div([
-            html.P(f"Point #{target_for_plot} | {'Selected' if is_selected else 'Not Selected'} | {'Pareto' if is_pareto else 'Non-Pareto'}", 
+            html.P(f"Point #{target_id} | {'Selected' if is_selected else 'Not Selected'} | {'Pareto' if is_pareto else 'Non-Pareto'}", 
                    style={'fontWeight': 'bold'}),
             html.P(obj_display, style={'fontSize': '12px'}),
-            html.P(f"Total: {total_obj:.4f} | Rank: {rank}/{len(filtered_objectives)} | Ideal Dist: {ideal_distance:.4f}", 
+            html.P(f"Total: {total_obj:.4f} | Rank: {rank}/{len(pso_data['objectives'])} | Ideal Dist: {ideal_distance:.4f}", 
                    style={'fontSize': '11px'})
         ])
 
