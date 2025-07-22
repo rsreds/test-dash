@@ -334,9 +334,9 @@ app.layout = dbc.Container([
                     dbc.Col([
                         dcc.Graph(id='main-plot', style={'height': '80vh'}, config={'displayModeBar': True})
                     ], width=12)
-                ], className="mb-3"),
+                ], className="mb-4"),
                 
-                # Point info and activity log below the plot
+                # Point info and activity log below the plot with spacing
                 dbc.Row([
                     dbc.Col([
                         dbc.Card([
@@ -365,7 +365,7 @@ app.layout = dbc.Container([
                         html.H6("Filters", className="card-title"),
                         html.Div(id='slider-container')
                     ])
-                ], style={'height': '100%'})
+                ])
             ], width=3)
         ])
     ])
