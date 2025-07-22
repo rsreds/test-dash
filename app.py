@@ -325,43 +325,49 @@ app.layout = dbc.Container([
             ], width=12)
         ], className="mb-4"),
         
-        # Main plot
+        # Main content area with plot and filters
         dbc.Row([
+            # Left side: Plot and info panels
             dbc.Col([
-                dcc.Graph(id='main-plot', style={'height': '80vh'}, config={'displayModeBar': True})
+                # Main plot
+                dbc.Row([
+                    dbc.Col([
+                        dcc.Graph(id='main-plot', style={'height': '80vh'}, config={'displayModeBar': True})
+                    ], width=12)
+                ], className="mb-3"),
+                
+                # Point info and activity log below the plot
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardBody([
+                                html.H6("Point Information", className="card-title"),
+                                html.Div(id='activity-panel', className="text-center")
+                            ])
+                        ])
+                    ], width=4),
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardBody([
+                                html.H6("Activity Log", className="card-title"),
+                                html.Div(id='activity-log', 
+                                       style={'height': '200px', 'overflowY': 'scroll', 'fontSize': '12px'})
+                            ])
+                        ])
+                    ], width=8)
+                ])
             ], width=9),
             
-            # Filters sidebar
+            # Right side: Filters sidebar (extends full height)
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
                         html.H6("Filters", className="card-title"),
                         html.Div(id='slider-container')
                     ])
-                ])
+                ], style={'height': '100%'})
             ], width=3)
-        ]),
-        
-        # Activity panel and log
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("Point Information", className="card-title"),
-                        html.Div(id='activity-panel', className="text-center")
-                    ])
-                ])
-            ], width=6),
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("Activity Log", className="card-title"),
-                        html.Div(id='activity-log', 
-                               style={'height': '200px', 'overflowY': 'scroll', 'fontSize': '12px'})
-                    ])
-                ])
-            ], width=6)
-        ], className="mt-3")
+        ])
     ])
 ], fluid=True)
 
