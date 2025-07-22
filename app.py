@@ -91,8 +91,8 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
     fig = make_subplots(
         rows=num_obj, cols=num_obj,
         subplot_titles=subplot_titles,
-        vertical_spacing=0.15,  # Increased spacing for better visibility
-        horizontal_spacing=0.12  # Increased spacing for better visibility
+        vertical_spacing=0.08,  # Smaller spacing for compact layout
+        horizontal_spacing=0.08  # Smaller spacing for compact layout
     )
 
     for i in range(num_obj):
@@ -199,14 +199,14 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
     fig.update_layout(
         title=dict(
             text=f'<b>{num_obj}×{num_obj} Interactive Multi-Objective Optimization Matrix</b>',
-            font=dict(size=20, color='#2E4057'),
+            font=dict(size=18, color='#2E4057'),
             x=0.5
         ),
-        height=max(600, num_obj * 300),  # Increased minimum height and grid size
+        height=min(500, max(400, num_obj * 120)),  # Much smaller height for proper squares
         showlegend=False,
         dragmode='select',
         selectdirection='d',
-        margin=dict(l=80, r=80, t=120, b=80)  # Increased margins for better spacing
+        margin=dict(l=60, r=60, t=80, b=60)  # Smaller margins
     )
     
     # Add legend annotation
@@ -329,11 +329,11 @@ app.layout = dbc.Container([
         dbc.Row([
             # Left side: Main plot and info panels (9 columns)
             dbc.Col([
-                # Main plot with better height calculation
-                dcc.Graph(id='main-plot', style={'height': '70vh', 'minHeight': '600px'}, config={'displayModeBar': True}),
+                # Main plot with fixed height to prevent overlap
+                dcc.Graph(id='main-plot', style={'height': '55vh', 'minHeight': '500px'}, config={'displayModeBar': True}),
                 
-                # 30px spacing between plot and info panels
-                html.Div(style={'height': '30px'}),
+                # 20px spacing between plot and info panels
+                html.Div(style={'height': '20px'}),
                 
                 # Point info and activity log below the plot
                 dbc.Row([
@@ -350,7 +350,7 @@ app.layout = dbc.Container([
                             dbc.CardBody([
                                 html.H6("Activity Log", className="card-title"),
                                 html.Div(id='activity-log', 
-                                       style={'height': '180px', 'overflowY': 'scroll', 'fontSize': '12px'})
+                                       style={'height': '150px', 'overflowY': 'scroll', 'fontSize': '12px'})
                             ])
                         ])
                     ], width=5)  # Activity Log: 5 columns
@@ -364,7 +364,7 @@ app.layout = dbc.Container([
                         html.H6("Filters", className="card-title"),
                         html.Div(id='slider-container')
                     ])
-                ], style={'height': 'calc(70vh + 210px + 30px)', 'minHeight': 'calc(600px + 210px + 30px)'})  # Match plot + activity log + spacing
+                ], style={'height': 'calc(55vh + 170px + 20px)', 'minHeight': 'calc(500px + 170px + 20px)'})  # Match plot + activity log + spacing
             ], width=3)  # Filters: 3 columns
         ])
     ])
