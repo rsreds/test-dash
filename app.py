@@ -179,7 +179,7 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
         height=num_obj * 250,
         showlegend=False,
         dragmode='select',
-        selectdirection='diagonal',
+        selectdirection='d',
         margin=dict(l=60, r=60, t=100, b=60)
     )
     
