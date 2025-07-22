@@ -91,8 +91,8 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
     fig = make_subplots(
         rows=num_obj, cols=num_obj,
         subplot_titles=subplot_titles,
-        vertical_spacing=0.12, 
-        horizontal_spacing=0.10
+        vertical_spacing=0.15,  # Increased spacing for better visibility
+        horizontal_spacing=0.12  # Increased spacing for better visibility
     )
 
     for i in range(num_obj):
@@ -202,11 +202,11 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
             font=dict(size=20, color='#2E4057'),
             x=0.5
         ),
-        height=num_obj * 250,
+        height=max(600, num_obj * 300),  # Increased minimum height and grid size
         showlegend=False,
         dragmode='select',
         selectdirection='d',
-        margin=dict(l=60, r=60, t=100, b=60)
+        margin=dict(l=80, r=80, t=120, b=80)  # Increased margins for better spacing
     )
     
     # Add legend annotation
@@ -329,11 +329,11 @@ app.layout = dbc.Container([
         dbc.Row([
             # Left side: Main plot and info panels (9 columns)
             dbc.Col([
-                # Main plot
-                dcc.Graph(id='main-plot', style={'height': '80vh'}, config={'displayModeBar': True}),
+                # Main plot with better height calculation
+                dcc.Graph(id='main-plot', style={'height': '70vh', 'minHeight': '600px'}, config={'displayModeBar': True}),
                 
-                # 20px spacing between plot and info panels
-                html.Div(style={'height': '20px'}),
+                # 30px spacing between plot and info panels
+                html.Div(style={'height': '30px'}),
                 
                 # Point info and activity log below the plot
                 dbc.Row([
@@ -350,10 +350,10 @@ app.layout = dbc.Container([
                             dbc.CardBody([
                                 html.H6("Activity Log", className="card-title"),
                                 html.Div(id='activity-log', 
-                                       style={'height': '200px', 'overflowY': 'scroll', 'fontSize': '12px'})
+                                       style={'height': '180px', 'overflowY': 'scroll', 'fontSize': '12px'})
                             ])
                         ])
-                    ], width=5)  # Activity Log: 5 columns (changed from 8)
+                    ], width=5)  # Activity Log: 5 columns
                 ])
             ], width=9),  # Main content: 9 columns
             
@@ -364,7 +364,7 @@ app.layout = dbc.Container([
                         html.H6("Filters", className="card-title"),
                         html.Div(id='slider-container')
                     ])
-                ], style={'height': 'calc(80vh + 220px + 20px)'})  # Plot height + activity log + spacing
+                ], style={'height': 'calc(70vh + 210px + 30px)', 'minHeight': 'calc(600px + 210px + 30px)'})  # Match plot + activity log + spacing
             ], width=3)  # Filters: 3 columns
         ])
     ])
