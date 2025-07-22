@@ -617,29 +617,61 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
     elif 'delete-selected-btn' in trigger and delete_clicks:
         if pso_data['selected_indices']:
             count = len(pso_data['selected_indices'])
+            # Convert to sorted list to handle indices properly
+            indices_to_delete = sorted(list(pso_data['selected_indices']), reverse=True)
+            
+            # Create boolean mask for keeping rows
             keep_mask = np.ones(len(pso_data['objectives']), dtype=bool)
-            # Ensure indices are within bounds
             for idx in pso_data['selected_indices']:
-                if idx < len(pso_data['objectives']):
+                if 0 <= idx < len(pso_data['objectives']):
                     keep_mask[idx] = False
+            
+            # Apply the mask to both objectives and parameters
             pso_data['objectives'] = pso_data['objectives'][keep_mask]
-            if len(pso_data['parameters']) > 0:
+            if pso_data['parameters'] is not None and len(pso_data['parameters']) > 0:
                 pso_data['parameters'] = pso_data['parameters'][keep_mask]
+            
+            # Clear selection and recalculate bounds
             pso_data['selected_indices'] = set()
-            log_activity(f"Deleted {count} points")
+            
+            # Recalculate parameter bounds if parameters exist
+            if pso_data['parameters'] is not None and pso_data['parameters'].shape[1] > 0:
+                pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
+                pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+            
+            # Recalculate objective bounds
+            if len(pso_data['objectives']) > 0:
+                pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
+                pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
+            
+            log_activity(f"Deleted {count} points, {len(pso_data['objectives'])} points remaining")
         
     elif 'keep-selected-btn' in trigger and keep_clicks:
         if pso_data['selected_indices']:
-            count = len(pso_data['selected_indices'])
-            selected_list = sorted(list(pso_data['selected_indices']))
-            # Ensure indices are within bounds
-            valid_selected = [idx for idx in selected_list if idx < len(pso_data['objectives'])]
-            if valid_selected:
-                pso_data['objectives'] = pso_data['objectives'][valid_selected]
-                if len(pso_data['parameters']) > 0:
-                    pso_data['parameters'] = pso_data['parameters'][valid_selected]
+            # Convert to sorted list and ensure indices are valid
+            valid_indices = [idx for idx in pso_data['selected_indices'] 
+                           if 0 <= idx < len(pso_data['objectives'])]
+            
+            if valid_indices:
+                # Keep only selected points
+                pso_data['objectives'] = pso_data['objectives'][valid_indices]
+                if pso_data['parameters'] is not None and len(pso_data['parameters']) > 0:
+                    pso_data['parameters'] = pso_data['parameters'][valid_indices]
+                
+                # Clear selection and recalculate bounds
                 pso_data['selected_indices'] = set()
-                log_activity(f"Kept only {len(valid_selected)} points")
+                
+                # Recalculate parameter bounds if parameters exist
+                if pso_data['parameters'] is not None and pso_data['parameters'].shape[1] > 0:
+                    pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
+                    pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+                
+                # Recalculate objective bounds
+                if len(pso_data['objectives']) > 0:
+                    pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
+                    pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
+                
+                log_activity(f"Kept only {len(valid_indices)} selected points")
             else:
                 log_activity("No valid selected points to keep")
             
