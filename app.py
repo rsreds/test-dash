@@ -376,6 +376,7 @@ def load_csv(contents, filename):
         pso_data['parameters'] = param_data
         pso_data['objectives'] = obj_data
         pso_data['original_objectives'] = obj_data.copy()
+        pso_data['original_parameters'] = param_data.copy() if len(param_data) > 0 else None
         pso_data['param_names'] = param_cols
         pso_data['obj_names'] = obj_cols
         pso_data['filename'] = filename
@@ -508,8 +509,10 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         if pso_data['selected_indices']:
             count = len(pso_data['selected_indices'])
             keep_mask = np.ones(len(pso_data['objectives']), dtype=bool)
+            # Ensure indices are within bounds
             for idx in pso_data['selected_indices']:
-                keep_mask[idx] = False
+                if idx < len(pso_data['objectives']):
+                    keep_mask[idx] = False
             pso_data['objectives'] = pso_data['objectives'][keep_mask]
             if len(pso_data['parameters']) > 0:
                 pso_data['parameters'] = pso_data['parameters'][keep_mask]
@@ -520,16 +523,37 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         if pso_data['selected_indices']:
             count = len(pso_data['selected_indices'])
             selected_list = sorted(list(pso_data['selected_indices']))
-            pso_data['objectives'] = pso_data['objectives'][selected_list]
-            if len(pso_data['parameters']) > 0:
-                pso_data['parameters'] = pso_data['parameters'][selected_list]
-            pso_data['selected_indices'] = set()
-            log_activity(f"Kept only {count} points")
+            # Ensure indices are within bounds
+            valid_selected = [idx for idx in selected_list if idx < len(pso_data['objectives'])]
+            if valid_selected:
+                pso_data['objectives'] = pso_data['objectives'][valid_selected]
+                if len(pso_data['parameters']) > 0:
+                    pso_data['parameters'] = pso_data['parameters'][valid_selected]
+                pso_data['selected_indices'] = set()
+                log_activity(f"Kept only {len(valid_selected)} points")
+            else:
+                log_activity("No valid selected points to keep")
             
     elif 'reset-data-btn' in trigger and reset_clicks:
         pso_data['objectives'] = pso_data['original_objectives'].copy()
+        # Reset parameters too if they exist
+        if 'original_parameters' in pso_data and pso_data['original_parameters'] is not None:
+            pso_data['parameters'] = pso_data['original_parameters'].copy()
         pso_data['selected_indices'] = set()
         log_activity("Reset data to original")
+        
+    # Handle click data for individual point selection
+    elif 'main-plot' in trigger and click_data and click_data.get('points'):
+        clicked_point = click_data['points'][0]
+        if 'customdata' in clicked_point:
+            point_id = clicked_point['customdata']
+            # Toggle selection
+            if point_id in pso_data['selected_indices']:
+                pso_data['selected_indices'].remove(point_id)
+                log_activity(f"Deselected point #{point_id}")
+            else:
+                pso_data['selected_indices'].add(point_id)
+                log_activity(f"Selected point #{point_id}")
         
     elif 'main-plot' in trigger and selected_data and selected_data.get('points'):
         # Handle plot selection
@@ -545,48 +569,95 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
     if target_id is None or target_id >= len(pso_data['objectives']) or target_id < 0:
         target_id = 0
 
-    # Create the plot
+    # Apply filters to data
+    current_objectives = pso_data['objectives'].copy()
+    current_parameters = pso_data['parameters'].copy() if len(pso_data['parameters']) > 0 else None
+    filter_mask = np.ones(len(current_objectives), dtype=bool)
+    
+    # Apply parameter filters
+    if current_parameters is not None and len(param_slider_values) > 0:
+        for i, slider_range in enumerate(param_slider_values):
+            if i < current_parameters.shape[1]:
+                low, high = slider_range
+                filter_mask &= (current_parameters[:, i] >= low) & (current_parameters[:, i] <= high)
+    
+    # Apply objective filters  
+    if len(obj_slider_values) > 0:
+        for i, slider_range in enumerate(obj_slider_values):
+            if i < current_objectives.shape[1]:
+                low, high = slider_range
+                filter_mask &= (current_objectives[:, i] >= low) & (current_objectives[:, i] <= high)
+    
+    # Apply filters
+    if not np.all(filter_mask):
+        filtered_objectives = current_objectives[filter_mask]
+        # Update selected indices to match filtered data
+        old_to_new_mapping = {}
+        new_idx = 0
+        for old_idx in range(len(filter_mask)):
+            if filter_mask[old_idx]:
+                old_to_new_mapping[old_idx] = new_idx
+                new_idx += 1
+        
+        # Update selected indices
+        new_selected_indices = set()
+        for old_idx in pso_data['selected_indices']:
+            if old_idx in old_to_new_mapping:
+                new_selected_indices.add(old_to_new_mapping[old_idx])
+        selected_for_plot = new_selected_indices
+        
+        # Adjust target_id
+        if target_id in old_to_new_mapping:
+            target_for_plot = old_to_new_mapping[target_id]
+        else:
+            target_for_plot = 0
+    else:
+        filtered_objectives = current_objectives
+        selected_for_plot = pso_data['selected_indices']
+        target_for_plot = target_id
+
+    # Create the plot with filtered data
     fig = create_interactive_scatter_matrix(
-        pso_data['objectives'], 
+        filtered_objectives, 
         pso_data.get('pareto_objectives', np.array([])), 
-        target_id, 
-        pso_data['selected_indices'],
+        target_for_plot, 
+        selected_for_plot,
         (pso_data['obj_mins'], pso_data['obj_maxs'])
     )
 
     # Update status
     stats = {
-        'total': len(pso_data['objectives']),
-        'pareto': np.sum(filter_pareto_front(pso_data['objectives'])),
-        'selected': len(pso_data['selected_indices'])
+        'total': len(filtered_objectives),
+        'pareto': np.sum(filter_pareto_front(filtered_objectives)) if len(filtered_objectives) > 0 else 0,
+        'selected': len(selected_for_plot)
     }
     
     status_content = dbc.Row([
         dbc.Col(html.Strong(f"Total: {stats['total']}"), width=3),
         dbc.Col(html.Strong(f"Pareto: {stats['pareto']}", style={'color': 'blue'}), width=3),
         dbc.Col(html.Strong(f"Selected: {stats['selected']}", style={'color': 'red'}), width=3),
-        dbc.Col(html.Strong(f"Target: #{target_id}", style={'color': 'darkred'}), width=3)
+        dbc.Col(html.Strong(f"Target: #{target_for_plot}", style={'color': 'darkred'}), width=3)
     ])
 
-    # Update activity panel
+    # Update activity panel  
     activity_content = "No point information available"
-    if target_id < len(pso_data['objectives']):
-        obj_values = pso_data['objectives'][target_id]
-        is_pareto = filter_pareto_front(pso_data['objectives'])[target_id]
-        is_selected = target_id in pso_data['selected_indices']
+    if target_for_plot < len(filtered_objectives):
+        obj_values = filtered_objectives[target_for_plot]
+        is_pareto = filter_pareto_front(filtered_objectives)[target_for_plot] if len(filtered_objectives) > 0 else False
+        is_selected = target_for_plot in selected_for_plot
         
         total_obj = np.sum(obj_values)
-        all_totals = np.sum(pso_data['objectives'], axis=1)
-        rank = np.sum(all_totals < total_obj) + 1
+        all_totals = np.sum(filtered_objectives, axis=1) if len(filtered_objectives) > 0 else np.array([])
+        rank = np.sum(all_totals < total_obj) + 1 if len(all_totals) > 0 else 1
         ideal_distance = np.sqrt(np.sum(obj_values**2))
         
         obj_display = " | ".join([f"Obj{i+1}: {val:.4f}" for i, val in enumerate(obj_values[:5])])
         
         activity_content = html.Div([
-            html.P(f"Point #{target_id} | {'Selected' if is_selected else 'Not Selected'} | {'Pareto' if is_pareto else 'Non-Pareto'}", 
+            html.P(f"Point #{target_for_plot} | {'Selected' if is_selected else 'Not Selected'} | {'Pareto' if is_pareto else 'Non-Pareto'}", 
                    style={'fontWeight': 'bold'}),
             html.P(obj_display, style={'fontSize': '12px'}),
-            html.P(f"Total: {total_obj:.4f} | Rank: {rank}/{len(pso_data['objectives'])} | Ideal Dist: {ideal_distance:.4f}", 
+            html.P(f"Total: {total_obj:.4f} | Rank: {rank}/{len(filtered_objectives)} | Ideal Dist: {ideal_distance:.4f}", 
                    style={'fontSize': '11px'})
         ])
 
