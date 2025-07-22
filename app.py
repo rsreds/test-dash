@@ -325,45 +325,47 @@ app.layout = dbc.Container([
             ], width=12)
         ], className="mb-4"),
         
-        # Main content area with plot on left, filters on right
+        # Main content area with extended filters sidebar
         dbc.Row([
-            # Left side: Plot area (9 columns)
+            # Left side: Plot and info panels (9 columns)
             dbc.Col([
-                dcc.Graph(id='main-plot', style={'height': '80vh'}, config={'displayModeBar': True})
+                # Main plot
+                dcc.Graph(id='main-plot', style={'height': '80vh'}, config={'displayModeBar': True}),
+                
+                # Spacing between plot and info panels
+                html.Div(style={'height': '20px'}),
+                
+                # Point info and activity log below the plot
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardBody([
+                                html.H6("Point Information", className="card-title"),
+                                html.Div(id='activity-panel', className="text-center")
+                            ])
+                        ])
+                    ], width=4),
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardBody([
+                                html.H6("Activity Log", className="card-title"),
+                                html.Div(id='activity-log', 
+                                       style={'height': '200px', 'overflowY': 'scroll', 'fontSize': '12px'})
+                            ])
+                        ])
+                    ], width=8)
+                ])
             ], width=9),
             
-            # Right side: Filters sidebar (3 columns)
+            # Right side: Filters sidebar extending full height (3 columns)
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
                         html.H6("Filters", className="card-title"),
                         html.Div(id='slider-container')
                     ])
-                ])
+                ], style={'height': 'calc(80vh + 220px + 20px)'})  # Plot height + activity log + spacing
             ], width=3)
-        ], className="mb-4"),
-        
-        # Point info and activity log below the plot area (aligned with plot)
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("Point Information", className="card-title"),
-                        html.Div(id='activity-panel', className="text-center")
-                    ])
-                ])
-            ], width=4),
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("Activity Log", className="card-title"),
-                        html.Div(id='activity-log', 
-                               style={'height': '200px', 'overflowY': 'scroll', 'fontSize': '12px'})
-                    ])
-                ])
-            ], width=5),
-            # Empty space to align with the filter area
-            dbc.Col([], width=3)
         ])
     ])
 ], fluid=True)
