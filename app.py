@@ -91,8 +91,8 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
     fig = make_subplots(
         rows=num_obj, cols=num_obj,
         subplot_titles=subplot_titles,
-        vertical_spacing=0.08,  # Smaller spacing for compact layout
-        horizontal_spacing=0.08  # Smaller spacing for compact layout
+        vertical_spacing=0.12, 
+        horizontal_spacing=0.10
     )
 
     for i in range(num_obj):
@@ -199,14 +199,14 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
     fig.update_layout(
         title=dict(
             text=f'<b>{num_obj}×{num_obj} Interactive Multi-Objective Optimization Matrix</b>',
-            font=dict(size=18, color='#2E4057'),
+            font=dict(size=20, color='#2E4057'),
             x=0.5
         ),
-        height=min(500, max(400, num_obj * 120)),  # Much smaller height for proper squares
+        height=num_obj * 250,
         showlegend=False,
         dragmode='select',
         selectdirection='d',
-        margin=dict(l=60, r=60, t=80, b=60)  # Smaller margins
+        margin=dict(l=60, r=60, t=100, b=60)
     )
     
     # Add legend annotation
@@ -325,48 +325,43 @@ app.layout = dbc.Container([
             ], width=12)
         ], className="mb-4"),
         
-        # Main content area with layout exactly as specified
+        # Main plot
         dbc.Row([
-            # Left side: Main plot and info panels (9 columns)
             dbc.Col([
-                # Main plot with fixed height to prevent overlap
-                dcc.Graph(id='main-plot', style={'height': '55vh', 'minHeight': '500px'}, config={'displayModeBar': True}),
-                
-                # 20px spacing between plot and info panels
-                html.Div(style={'height': '20px'}),
-                
-                # Point info and activity log below the plot
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardBody([
-                                html.H6("Point Information", className="card-title"),
-                                html.Div(id='activity-panel', className="text-center")
-                            ])
-                        ])
-                    ], width=4),  # Point Info: 4 columns
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardBody([
-                                html.H6("Activity Log", className="card-title"),
-                                html.Div(id='activity-log', 
-                                       style={'height': '150px', 'overflowY': 'scroll', 'fontSize': '12px'})
-                            ])
-                        ])
-                    ], width=5)  # Activity Log: 5 columns
-                ])
-            ], width=9),  # Main content: 9 columns
+                dcc.Graph(id='main-plot', style={'height': '80vh'}, config={'displayModeBar': True})
+            ], width=9),
             
-            # Right side: Filters sidebar extending full height (3 columns)
+            # Filters sidebar
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
                         html.H6("Filters", className="card-title"),
                         html.Div(id='slider-container')
                     ])
-                ], style={'height': 'calc(55vh + 170px + 20px)', 'minHeight': 'calc(500px + 170px + 20px)'})  # Match plot + activity log + spacing
-            ], width=3)  # Filters: 3 columns
-        ])
+                ])
+            ], width=3)
+        ]),
+        
+        # Activity panel and log
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6("Point Information", className="card-title"),
+                        html.Div(id='activity-panel', className="text-center")
+                    ])
+                ])
+            ], width=6),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6("Activity Log", className="card-title"),
+                        html.Div(id='activity-log', 
+                               style={'height': '200px', 'overflowY': 'scroll', 'fontSize': '12px'})
+                    ])
+                ])
+            ], width=6)
+        ], className="mt-3")
     ])
 ], fluid=True)
 
