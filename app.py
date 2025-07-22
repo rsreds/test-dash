@@ -685,7 +685,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
     filter_mask = np.ones(len(current_objectives), dtype=bool)
     
     # Apply parameter filters
-    if current_parameters is not None and len(param_slider_values) > 0:
+    if current_parameters is not None and len(param_slider_values) > 0 and current_parameters.shape[1] > 0:
         for i, slider_range in enumerate(param_slider_values):
             if i < current_parameters.shape[1]:
                 low, high = slider_range
