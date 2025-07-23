@@ -45,7 +45,12 @@ def get_displayed_objectives():
 
 def create_slider(title, slider_id, min_val, max_val):
     return html.Div([
-        html.P(f"Filter by {title}:", style={'marginBottom': '5px', 'marginTop': '15px', 'fontSize': '14px'}),
+        html.P(f"Filter by {title}:", style={
+            'marginBottom': '5px', 
+            'marginTop': '15px', 
+            'fontSize': '14px',
+            'fontWeight': 'bold'
+        }),
         dcc.RangeSlider(
             id=slider_id,
             min=min_val,
@@ -56,7 +61,13 @@ def create_slider(title, slider_id, min_val, max_val):
             tooltip={"placement": "bottom", "always_visible": False},
             updatemode='drag'
         )
-    ], style={'marginBottom': '15px'})
+    ], style={
+        'marginBottom': '20px',
+        'padding': '10px',
+        'backgroundColor': '#f8f9fa',
+        'borderRadius': '5px',
+        'border': '1px solid #dee2e6'
+    })
 
 def create_sliders():
     """Create sliders based on current data"""
