@@ -778,32 +778,49 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         # Apply filters safely - skip filtering if sliders don't match data
         filter_mask = np.ones(len(current_objectives), dtype=bool)
         
-        # Apply parameter filters only if sliders and data match
-        if (current_parameters is not None and 
-            len(param_slider_values) > 0 and 
-            current_parameters.shape[1] > 0):
+        # DEFENSIVE FILTERING: Only apply filters if dimensions exactly match
+        try:
+            # Apply parameter filters only if everything matches perfectly
+            if (current_parameters is not None and 
+                len(param_slider_values) > 0 and 
+                current_parameters.shape[1] > 0):
+                
+                # EXACT match required - if slider count doesn't match parameter count, skip filtering
+                if len(param_slider_values) == current_parameters.shape[1]:
+                    for i, slider_range in enumerate(param_slider_values):
+                        if (i < current_parameters.shape[1] and 
+                            len(slider_range) == 2 and
+                            all(np.isfinite(slider_range))):
+                            low, high = slider_range
+                            # Additional safety check for array shapes
+                            if current_parameters[:, i].shape == filter_mask.shape:
+                                filter_mask &= (current_parameters[:, i] >= low) & (current_parameters[:, i] <= high)
+                else:
+                    # Slider count mismatch - skip parameter filtering
+                    log_activity(f"Skipping parameter filters: {len(param_slider_values)} sliders vs {current_parameters.shape[1]} parameters")
             
-            # Only apply filters if slider count matches parameter count
-            if len(param_slider_values) <= current_parameters.shape[1]:
-                for i, slider_range in enumerate(param_slider_values):
-                    if (i < current_parameters.shape[1] and 
-                        len(slider_range) == 2 and
-                        all(np.isfinite(slider_range))):
-                        low, high = slider_range
-                        filter_mask &= (current_parameters[:, i] >= low) & (current_parameters[:, i] <= high)
-        
-        # Apply objective filters only if sliders and data match
-        if (len(obj_slider_values) > 0 and 
-            current_objectives.shape[1] > 0):
-            
-            # Only apply filters if slider count matches objective count
-            if len(obj_slider_values) <= current_objectives.shape[1]:
-                for i, slider_range in enumerate(obj_slider_values):
-                    if (i < current_objectives.shape[1] and 
-                        len(slider_range) == 2 and
-                        all(np.isfinite(slider_range))):
-                        low, high = slider_range
-                        filter_mask &= (current_objectives[:, i] >= low) & (current_objectives[:, i] <= high)
+            # Apply objective filters only if everything matches perfectly  
+            if (len(obj_slider_values) > 0 and 
+                current_objectives.shape[1] > 0):
+                
+                # EXACT match required - if slider count doesn't match objective count, skip filtering
+                if len(obj_slider_values) == current_objectives.shape[1]:
+                    for i, slider_range in enumerate(obj_slider_values):
+                        if (i < current_objectives.shape[1] and 
+                            len(slider_range) == 2 and
+                            all(np.isfinite(slider_range))):
+                            low, high = slider_range
+                            # Additional safety check for array shapes
+                            if current_objectives[:, i].shape == filter_mask.shape:
+                                filter_mask &= (current_objectives[:, i] >= low) & (current_objectives[:, i] <= high)
+                else:
+                    # Slider count mismatch - skip objective filtering
+                    log_activity(f"Skipping objective filters: {len(obj_slider_values)} sliders vs {current_objectives.shape[1]} objectives")
+                    
+        except Exception as filter_error:
+            # If any filtering fails, just use no filtering
+            filter_mask = np.ones(len(current_objectives), dtype=bool)
+            log_activity(f"Filter error, using no filtering: {str(filter_error)}")
 
         # Create the plot safely
         try:
