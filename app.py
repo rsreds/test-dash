@@ -24,7 +24,7 @@ pso_data = {
     'obj_mins': None,  
     'obj_maxs': None,
     'selected_indices': set(),
-    'current_clicked_point': None,  # Track last clicked point
+    'current_clicked_point': None,
     'activity_log': [],
     'displayed_objectives': None,
     'max_objectives': 0
@@ -74,7 +74,7 @@ def create_sliders():
     sliders = []
     
     try:
-        # Parameter sliders - use just the parameter name
+        # Parameter sliders
         if (pso_data['parameters'] is not None and 
             len(pso_data['parameters']) > 0 and 
             pso_data['parameters'].shape[1] > 0 and
@@ -90,7 +90,7 @@ def create_sliders():
                                                    {'type': 'param-slider', 'index': i}, 
                                                    param_min, param_max))
 
-        # Objective sliders - use just the objective name
+        # Objective sliders
         if (pso_data['objectives'] is not None and 
             len(pso_data['objectives']) > 0 and
             len(pso_data['obj_names']) > 0):
@@ -101,7 +101,7 @@ def create_sliders():
                     obj_min = float(np.min(pso_data['objectives'][:, i]))
                     obj_max = float(np.max(pso_data['objectives'][:, i]))
                     if obj_min != obj_max:
-                        sliders.append(create_slider(name,  # Just the name, no "Obj 1" prefix
+                        sliders.append(create_slider(name,
                                                    {'type': 'obj-slider', 'index': i}, 
                                                    obj_min, obj_max))
     except Exception as e:
@@ -307,7 +307,6 @@ app.layout = dbc.Container([
                     dbc.CardBody([
                         html.H5("Interactive Controls", className="card-title"),
                         
-                        # Remove the structure text display
                         html.H6("Data Structure:", className="mt-3 mb-2"),
                         dbc.Row([
                             dbc.Col([
@@ -317,7 +316,6 @@ app.layout = dbc.Container([
                             dbc.Col([
                                 dbc.Button("Apply Structure", id='apply-obj-selection-btn', color="primary", size='sm', style={'marginTop': '20px'})
                             ], width=3)
-                            # Removed the objective-info column that showed structure text
                         ], className="mb-3"),
                         
                         html.H6("Selection Tools:", className="mt-3 mb-2"),
@@ -374,7 +372,7 @@ app.layout = dbc.Container([
                 ], style={
                     'position': 'fixed',
                     'left': '20px',
-                    'top': '420px',  # Adjust based on header height
+                    'top': '420px',
                     'width': '65%',
                     'height': '80vh',
                     'zIndex': '1000',
@@ -399,20 +397,18 @@ app.layout = dbc.Container([
                         })
                     ])
                 ], style={
-                    'marginLeft': '70%',  # Push to right side, accounting for fixed plot
+                    'marginLeft': '70%',
                     'position': 'relative',
                     'height': '80vh'
                 })
             ], width=4)
         ], style={'position': 'relative'}),
         
-        # Activity panel and log with proper spacing for fixed plot
         dbc.Row([
             dbc.Col([
-                html.Div(style={'height': '20px'})  # Spacer for fixed plot
+                html.Div(style={'height': '20px'})
             ], width=8),
             dbc.Col([
-                # This column continues below the filters
             ], width=4)
         ]),
         
@@ -616,7 +612,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
             if 'customdata' in clicked_point and isinstance(clicked_point['customdata'], int):
                 point_id = clicked_point['customdata']
                 if 0 <= point_id < len(pso_data['objectives']):
-                    pso_data['current_clicked_point'] = point_id  # Store clicked point
+                    pso_data['current_clicked_point'] = point_id 
                     if point_id in pso_data['selected_indices']:
                         pso_data['selected_indices'].remove(point_id)
                         log_activity(f"Deselected point #{point_id}")
