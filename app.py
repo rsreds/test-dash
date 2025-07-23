@@ -77,7 +77,7 @@ def create_sliders():
                     param_min = float(np.min(pso_data['parameters'][:, i]))
                     param_max = float(np.max(pso_data['parameters'][:, i]))
                     if param_min != param_max:  # Avoid sliders with same min/max
-                        sliders.append(create_slider(f"Param {i+1} ({name})", 
+                        sliders.append(create_slider(name, 
                                                    {'type': 'param-slider', 'index': i}, 
                                                    param_min, param_max))
 
@@ -92,7 +92,7 @@ def create_sliders():
                     obj_min = float(np.min(pso_data['objectives'][:, i]))
                     obj_max = float(np.max(pso_data['objectives'][:, i]))
                     if obj_min != obj_max:  # Avoid sliders with same min/max
-                        sliders.append(create_slider(f"Obj {i+1} ({name})", 
+                        sliders.append(create_slider(name, 
                                                    {'type': 'obj-slider', 'index': i}, 
                                                    obj_min, obj_max))
     except Exception as e:
@@ -246,10 +246,10 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
     # Add legend annotation
     legend_text = (
         "<b>Legend:</b><br>"
-        "🔵 Pareto Optimal<br>"
-        "🔷 Regular<br>"
-        "🔴 Selected<br>"
-        "⭐ Target"
+        "Blue: Pareto Optimal<br>"
+        "Light Blue: Regular<br>"
+        "Red: Selected<br>"
+        "Star: Target"
     )
     
     fig.add_annotation(
@@ -319,10 +319,7 @@ app.layout = dbc.Container([
                             ], width=4),
                             dbc.Col([
                                 dbc.Button("Apply Structure", id='apply-obj-selection-btn', color="primary", size='sm', style={'marginTop': '20px'})
-                            ], width=3),
-                            dbc.Col([
-                                html.Div(id='objective-info', style={'fontSize': '11px', 'marginTop': '5px'})
-                            ], width=5)
+                            ], width=3)
                         ], className="mb-3"),
                         
                         # Selection tools
@@ -449,7 +446,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
                 sliders = create_sliders()
                 
                 file_info = dbc.Alert([
-                    html.H6(f"📁 {pso_data['filename']}", className="alert-heading"),
+                    html.H6(f"File: {pso_data['filename']}", className="alert-heading"),
                     html.P([
                         f"Rows: {len(pso_data['objectives'])} | ",
                         f"Total Columns: {len(pso_data['param_names']) + len(pso_data['obj_names'])} | ",
@@ -529,7 +526,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
         sliders = create_sliders()
 
         file_info = dbc.Alert([
-            html.H6(f"📁 {filename}", className="alert-heading"),
+            html.H6(f"File: {filename}", className="alert-heading"),
             html.P([
                 f"Rows: {len(df)} | ",
                 f"Total Columns: {total_columns} | ",
@@ -546,29 +543,6 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
     except Exception as e:
         error_msg = dbc.Alert(f"Error loading file: {str(e)}", color="danger")
         return error_msg, [], {'display': 'none'}, 0, 2
-
-@app.callback(
-    [Output('objective-info', 'children')],
-    [Input('apply-obj-selection-btn', 'n_clicks')],
-    [State('num-objectives', 'value')],
-    prevent_initial_call=True
-)
-def update_objective_info(n_clicks, num_obj):
-    if not n_clicks or pso_data['objectives'] is None:
-        return [""]
-    
-    total_columns = len(pso_data['param_names']) + len(pso_data['obj_names'])
-    
-    if num_obj is None:
-        num_obj = 2
-        
-    num_obj = max(1, min(num_obj, total_columns))
-    num_params = total_columns - num_obj
-    
-    obj_info = f"Structure: {num_params} parameters + {num_obj} objectives = {total_columns} total columns"
-    log_activity(f"Updated data structure: {obj_info}")
-    
-    return [obj_info]
 
 @app.callback(
     [Output('main-plot', 'figure'),
@@ -860,14 +834,77 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         except Exception:
             status_content = "Status update error"
 
-        # Update activity panel safely
+        # Update activity panel with dynamic point information
         try:
             activity_content = "No point information available"
-            if target_id < len(current_objectives):
+            
+            # Check if we have selected points (multiple selection)
+            if len(pso_data['selected_indices']) > 1:
+                # Show summary statistics for multiple selected points
+                selected_indices_list = list(pso_data['selected_indices'])
+                selected_objectives = current_objectives[selected_indices_list]
+                
+                # Calculate summary statistics
+                num_selected = len(selected_indices_list)
+                pareto_mask_selected = filter_pareto_front(current_objectives)[selected_indices_list]
+                num_pareto_selected = np.sum(pareto_mask_selected)
+                
+                # Calculate averages, min, max for objectives
+                avg_objectives = np.mean(selected_objectives, axis=0)
+                min_objectives = np.min(selected_objectives, axis=0)
+                max_objectives = np.max(selected_objectives, axis=0)
+                
+                # Calculate total objective sums and ranks
+                total_objs = np.sum(selected_objectives, axis=1)
+                best_total = np.min(total_objs)
+                worst_total = np.max(total_objs)
+                avg_total = np.mean(total_objs)
+                
+                obj_names = pso_data.get('obj_names', [f'Obj_{i}' for i in range(len(avg_objectives))])
+                
+                # Create summary display
+                activity_content = html.Div([
+                    html.P(f"{num_selected} Points Selected | {num_pareto_selected} Pareto Optimal", 
+                           style={'fontWeight': 'bold', 'color': 'darkblue'}),
+                    html.Hr(style={'margin': '5px 0'}),
+                    html.P("Average Values:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'}),
+                    html.P(" | ".join([f"{obj_names[i] if i < len(obj_names) else f'Obj_{i}'}: {val:.4f}" 
+                                     for i, val in enumerate(avg_objectives[:4])]), 
+                           style={'fontSize': '11px', 'margin': '2px 0'}),
+                    html.P(f"Total Sum - Avg: {avg_total:.4f} | Best: {best_total:.4f} | Worst: {worst_total:.4f}", 
+                           style={'fontSize': '11px', 'margin': '2px 0', 'color': 'darkgreen'})
+                ])
+                
+            elif len(pso_data['selected_indices']) == 1:
+                # Show detailed info for single selected point
+                point_id = list(pso_data['selected_indices'])[0]
+                if point_id < len(current_objectives):
+                    obj_values = current_objectives[point_id]
+                    is_pareto = (filter_pareto_front(current_objectives)[point_id] 
+                               if len(current_objectives) > 0 else False)
+                    
+                    total_obj = np.sum(obj_values)
+                    all_totals = np.sum(current_objectives, axis=1) if len(current_objectives) > 0 else np.array([])
+                    rank = np.sum(all_totals < total_obj) + 1 if len(all_totals) > 0 else 1
+                    ideal_distance = np.sqrt(np.sum(obj_values**2))
+                    
+                    obj_names = pso_data.get('obj_names', [f'Obj_{i}' for i in range(len(obj_values))])
+                    obj_display = " | ".join([f"{obj_names[i] if i < len(obj_names) else f'Obj_{i}'}: {val:.4f}" 
+                                            for i, val in enumerate(obj_values[:5])])
+                    
+                    activity_content = html.Div([
+                        html.P(f"Point #{point_id} | {'Pareto' if is_pareto else 'Non-Pareto'}", 
+                               style={'fontWeight': 'bold', 'color': 'red'}),
+                        html.P(obj_display, style={'fontSize': '12px'}),
+                        html.P(f"Total: {total_obj:.4f} | Rank: {rank}/{len(current_objectives)} | Ideal Dist: {ideal_distance:.4f}", 
+                               style={'fontSize': '11px'})
+                    ])
+                    
+            elif target_id < len(current_objectives):
+                # Show info for target point when no selection
                 obj_values = current_objectives[target_id]
                 is_pareto = (filter_pareto_front(current_objectives)[target_id] 
                            if len(current_objectives) > 0 else False)
-                is_selected = target_id in pso_data['selected_indices']
                 
                 total_obj = np.sum(obj_values)
                 all_totals = np.sum(current_objectives, axis=1) if len(current_objectives) > 0 else np.array([])
@@ -879,14 +916,15 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                                         for i, val in enumerate(obj_values[:5])])
                 
                 activity_content = html.Div([
-                    html.P(f"Point #{target_id} | {'Selected' if is_selected else 'Not Selected'} | {'Pareto' if is_pareto else 'Non-Pareto'}", 
-                           style={'fontWeight': 'bold'}),
+                    html.P(f"Target Point #{target_id} | {'Pareto' if is_pareto else 'Non-Pareto'}", 
+                           style={'fontWeight': 'bold', 'color': 'darkred'}),
                     html.P(obj_display, style={'fontSize': '12px'}),
                     html.P(f"Total: {total_obj:.4f} | Rank: {rank}/{len(current_objectives)} | Ideal Dist: {ideal_distance:.4f}", 
                            style={'fontSize': '11px'})
                 ])
-        except Exception:
-            activity_content = "Point information error"
+                
+        except Exception as activity_error:
+            activity_content = f"Point information error: {str(activity_error)}"
 
         # Update activity log safely
         try:
