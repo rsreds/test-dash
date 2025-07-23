@@ -366,19 +366,54 @@ app.layout = dbc.Container([
             ], width=12)
         ], className="mb-4"),
         
+        # Fixed plot on left, scrollable parameters on right
         dbc.Row([
             dbc.Col([
-                dcc.Graph(id='main-plot', style={'height': '80vh'}, config={'displayModeBar': True})
-            ], width=9),
+                html.Div([
+                    dcc.Graph(id='main-plot', style={'height': '80vh'}, config={'displayModeBar': True})
+                ], style={
+                    'position': 'fixed',
+                    'left': '20px',
+                    'top': '420px',  # Adjust based on header height
+                    'width': '65%',
+                    'height': '80vh',
+                    'zIndex': '1000',
+                    'backgroundColor': 'white',
+                    'borderRadius': '8px',
+                    'boxShadow': '0 4px 6px rgba(0, 0, 0, 0.1)',
+                    'border': '1px solid #dee2e6'
+                })
+            ], width=8),
             
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
-                        html.H6("Filters", className="card-title"),
-                        html.Div(id='slider-container')
+                        html.H6("Parameter & Objective Filters", className="card-title", 
+                               style={'position': 'sticky', 'top': '0', 'backgroundColor': 'white', 
+                                     'zIndex': '10', 'paddingBottom': '10px', 'marginBottom': '10px',
+                                     'borderBottom': '1px solid #dee2e6'}),
+                        html.Div(id='slider-container', style={
+                            'maxHeight': '70vh',
+                            'overflowY': 'auto',
+                            'paddingRight': '10px'
+                        })
                     ])
-                ])
-            ], width=3)
+                ], style={
+                    'marginLeft': '70%',  # Push to right side, accounting for fixed plot
+                    'position': 'relative',
+                    'height': '80vh'
+                })
+            ], width=4)
+        ], style={'position': 'relative'}),
+        
+        # Activity panel and log with proper spacing for fixed plot
+        dbc.Row([
+            dbc.Col([
+                html.Div(style={'height': '20px'})  # Spacer for fixed plot
+            ], width=8),
+            dbc.Col([
+                # This column continues below the filters
+            ], width=4)
         ]),
         
         dbc.Row([
@@ -388,7 +423,7 @@ app.layout = dbc.Container([
                         html.H6("Point Information", className="card-title"),
                         html.Div(id='activity-panel', className="text-center")
                     ])
-                ])
+                ], style={'marginTop': '20px'})
             ], width=6),
             dbc.Col([
                 dbc.Card([
@@ -397,9 +432,9 @@ app.layout = dbc.Container([
                         html.Div(id='activity-log', 
                                style={'height': '200px', 'overflowY': 'scroll', 'fontSize': '12px'})
                     ])
-                ])
+                ], style={'marginTop': '20px'})
             ], width=6)
-        ], className="mt-3")
+        ], className="mt-3", style={'marginLeft': '70%', 'width': '30%'})
     ])
 ], fluid=True)
 
