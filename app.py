@@ -599,7 +599,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         if pso_data['objectives'] is None or len(pso_data['objectives']) == 0:
             empty_fig = go.Figure()
             empty_fig.update_layout(title="Upload a CSV file to begin")
-            return empty_fig, "No data loaded", "Upload CSV file", [], []
+            return empty_fig, "No data loaded", "Upload CSV file", []
 
         ctx = callback_context
         if not ctx.triggered:
@@ -612,7 +612,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         if displayed_objectives is None or len(displayed_objectives) == 0:
             empty_fig = go.Figure()
             empty_fig.update_layout(title="No data available")
-            return empty_fig, "No data", "No data", [], []
+            return empty_fig, "No data", "No data", []
 
         valid_selected = {idx for idx in pso_data['selected_indices'] 
                          if isinstance(idx, int) and 0 <= idx < len(displayed_objectives)}
@@ -981,7 +981,7 @@ def update_parameter_mini_plots(param_slider_values, obj_slider_values, contents
     if (pso_data['parameters'] is None or 
         len(pso_data['parameters']) == 0 or 
         not pso_data.get('show_param_plots', True)):
-        return [[]]
+        return []
     
     try:
         # Calculate current filter mask
@@ -1007,18 +1007,18 @@ def update_parameter_mini_plots(param_slider_values, obj_slider_values, contents
                     low, high = slider_range
                     filter_mask &= (pso_data['objectives'][:, i] >= low) & (pso_data['objectives'][:, i] <= high)
         
-        # Create updated mini plots
+        # Create updated mini plots - return exactly the number expected
         updated_figures = []
         for i, param_name in enumerate(pso_data['param_names']):
             if i < pso_data['parameters'].shape[1]:
                 fig = create_parameter_mini_plot(pso_data['parameters'], param_name, i, filter_mask)
                 updated_figures.append(fig)
         
-        return [updated_figures]
+        return updated_figures
         
     except Exception as e:
-        # Return empty figures on error
-        return [[go.Figure() for _ in range(len(pso_data.get('param_names', [])))]]
+        # Return empty figures on error - match the expected number
+        return [go.Figure() for _ in range(len(pso_data.get('param_names', [])))]
 
 @app.callback(
     Output('selection-store', 'data'),
