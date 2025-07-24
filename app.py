@@ -723,9 +723,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
      Input('delete-selected-btn', 'n_clicks'),
      Input('keep-selected-btn', 'n_clicks'),
      Input('reset-data-btn', 'n_clicks'),
-     Input('apply-obj-selection-btn', 'n_clicks'),
-     Input('reset-sliders-btn', 'n_clicks'),
-     Input('toggle-param-plots-btn', 'n_clicks')],
+     Input('apply-obj-selection-btn', 'n_clicks')],
     [State('selection-store', 'data'),
      State('ui-state-store', 'data')],
     prevent_initial_call=False
@@ -733,7 +731,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
 def update_visualization_and_ui(contents, param_slider_values, obj_slider_values, target_id,
                                selection_store, selected_data, click_data, 
                                clear_clicks, delete_clicks, keep_clicks, reset_clicks, 
-                               obj_selection_clicks, reset_sliders_clicks, toggle_plots_clicks,
+                               obj_selection_clicks,
                                current_selection_store, current_ui_state):
     """Unified callback for visualization and UI updates with error handling"""
     
@@ -763,20 +761,23 @@ def update_visualization_and_ui(contents, param_slider_values, obj_slider_values
         if displayed_objectives is None or len(displayed_objectives) == 0:
             return empty_fig, "No data", "No data", [], [], default_ui_state
 
-        # Handle UI state changes
+        # Handle UI state changes - check for dynamic button clicks
         ui_state_changed = False
         new_ui_state = current_ui_state.copy() if current_ui_state else {'slider_reset_trigger': 0, 'show_param_plots': True}
         
-        if 'toggle-param-plots-btn' in trigger and toggle_plots_clicks:
-            new_ui_state['show_param_plots'] = not new_ui_state.get('show_param_plots', True)
-            pso_data['show_param_plots'] = new_ui_state['show_param_plots']
-            ui_state_changed = True
-            log_activity(f"Parameter plots {'shown' if pso_data['show_param_plots'] else 'hidden'}")
-            
-        if 'reset-sliders-btn' in trigger and reset_sliders_clicks:
-            new_ui_state['slider_reset_trigger'] = new_ui_state.get('slider_reset_trigger', 0) + 1
-            ui_state_changed = True
-            log_activity("Reset all sliders to default ranges")
+        # Check for dynamic button triggers (these are created inside sliders)
+        if ctx.triggered:
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            if 'toggle-param-plots-btn' in triggered_id:
+                new_ui_state['show_param_plots'] = not new_ui_state.get('show_param_plots', True)
+                pso_data['show_param_plots'] = new_ui_state['show_param_plots']
+                ui_state_changed = True
+                log_activity(f"Parameter plots {'shown' if pso_data['show_param_plots'] else 'hidden'}")
+                
+            elif 'reset-sliders-btn' in triggered_id:
+                new_ui_state['slider_reset_trigger'] = new_ui_state.get('slider_reset_trigger', 0) + 1
+                ui_state_changed = True
+                log_activity("Reset all sliders to default ranges")
 
         # Handle click data to track which point was clicked
         if ('main-plot' in trigger and click_data and click_data.get('points') and 
@@ -1114,10 +1115,31 @@ def update_visualization_and_ui(contents, param_slider_values, obj_slider_values
             
         return error_fig, error_status, error_activity, error_log, error_sliders, (current_ui_state or {'slider_reset_trigger': 0, 'show_param_plots': True})
 
-@app.callback(
-    Output('selection-store', 'data'),
-    Input('main-plot', 'selectedData'),
-    State('selection-store', 'data'),
+# Add a separate callback to handle dynamic button clicks using clientside callback
+app.clientside_callback(
+    """
+    function(n_clicks_reset, n_clicks_toggle, current_state) {
+        const triggered = window.dash_clientside.callback_context.triggered;
+        if (!triggered || triggered.length === 0) {
+            return current_state || {slider_reset_trigger: 0, show_param_plots: true};
+        }
+        
+        const trigger_id = triggered[0].prop_id.split('.')[0];
+        let new_state = {...(current_state || {slider_reset_trigger: 0, show_param_plots: true})};
+        
+        if (trigger_id === 'reset-sliders-btn' && n_clicks_reset) {
+            new_state.slider_reset_trigger = (new_state.slider_reset_trigger || 0) + 1;
+        } else if (trigger_id === 'toggle-param-plots-btn' && n_clicks_toggle) {
+            new_state.show_param_plots = !new_state.show_param_plots;
+        }
+        
+        return new_state;
+    }
+    """,
+    Output('ui-state-store', 'data', allow_duplicate=True),
+    [Input('reset-sliders-btn', 'n_clicks'),
+     Input('toggle-param-plots-btn', 'n_clicks')],
+    [State('ui-state-store', 'data')],
     prevent_initial_call=True
 )
 def update_selection_store(selected_data, current_data):
