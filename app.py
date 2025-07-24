@@ -1,4 +1,3 @@
-#works perfectly with adjustments
 import base64
 import io
 import numpy as np
@@ -579,8 +578,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
     [Output('main-plot', 'figure'),
      Output('status-display', 'children'),
      Output('activity-panel', 'children'),
-     Output('activity-log', 'children'),
-     Output('slider-container', 'children', allow_duplicate=True)],  # Add slider container update
+     Output('activity-log', 'children')],
     [Input('upload-data', 'contents'),
      Input({'type': 'param-slider', 'index': ALL}, 'value'),
      Input({'type': 'obj-slider', 'index': ALL}, 'value'),
@@ -943,7 +941,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         except Exception:
             updated_sliders = []
 
-        return fig, status_content, activity_content, log_content, updated_sliders
+        return fig, status_content, activity_content, log_content
 
     except Exception as e:
         error_fig = go.Figure()
@@ -957,7 +955,20 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         except:
             pass
             
-        return error_fig, error_status, error_activity, error_log, []
+        return error_fig, error_status, error_activity, error_log
+
+# Add separate callback to handle slider updates when reset is clicked
+@app.callback(
+    Output('slider-container', 'children', allow_duplicate=True),
+    [Input('reset-sliders-btn', 'n_clicks'),
+     Input('toggle-param-plots-btn', 'n_clicks')],
+    prevent_initial_call=True
+)
+def update_sliders_on_reset(reset_clicks, toggle_clicks):
+    """Update sliders when reset button is clicked or plots are toggled"""
+    if reset_clicks or toggle_clicks:
+        return create_sliders()
+    return create_sliders()
 
 # Add callback to update parameter mini plots when filters change
 @app.callback(
