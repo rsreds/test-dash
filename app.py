@@ -1,3 +1,4 @@
+#works perfectly with adjustments
 import base64
 import io
 import numpy as np
@@ -322,12 +323,12 @@ app.layout = dbc.Container([
                                 dbc.Button("Clear Selection", id='clear-selection-btn', color="warning", size='sm', style={'width': '100%'})
                             ], width=2),
                             dbc.Col([
-                                html.Label("Target Point:", style={'fontSize': '12px', 'marginBottom': '2px'}),
-                                dbc.InputGroup([
-                                    dbc.Input(id='target-input', type='number', value=0, min=0, size='sm', placeholder="Target ID"),
-                                ])
+                                dbc.Input(id='target-input', type='number', value=0, min=0, size='sm', placeholder="Target ID")
                             ], width=2)
                         ]),
+                        html.Div([
+                            html.Label("Target Point:", style={'fontSize': '12px', 'textAlign': 'center', 'marginTop': '2px'})
+                        ], style={'textAlign': 'center', 'marginLeft': 'auto', 'marginRight': '16.67%', 'width': '16.67%'}),
                         
                         html.Div(id='status-display', className="mt-3 p-2 bg-light rounded")
                     ])
