@@ -1,4 +1,3 @@
-#works perfectly with adjustments
 import base64
 import io
 import numpy as np
@@ -26,11 +25,11 @@ pso_data = {
     'obj_mins': None,
     'obj_maxs': None,
     'selected_indices': set(),
-    'current_clicked_point': None,  # Track last clicked point
+    'current_clicked_point': None,
     'activity_log': [],
     'displayed_objectives': None,
     'max_objectives': 0,
-    'show_param_plots': True  # Track parameter plot visibility
+    'show_param_plots': True
 }
 
 def log_activity(message):
@@ -140,12 +139,9 @@ def create_sliders():
         ])
         sliders.append(control_buttons)
 
-        # Create a filter mask for current filtering state
-        # Note: The filter_mask here will be based on the last applied filters.
-        # This function primarily rebuilds the slider UI, the actual filtering happens in update_visualization.
         filter_mask = np.ones(len(pso_data['objectives']) if pso_data['objectives'] is not None else 0, dtype=bool)
 
-        # Parameter sliders - use just the parameter name
+        # Parameter sliders
         if (pso_data['parameters'] is not None and
             len(pso_data['parameters']) > 0 and
             pso_data['parameters'].shape[1] > 0 and
@@ -157,14 +153,14 @@ def create_sliders():
                     param_min = float(np.min(pso_data['parameters'][:, i]))
                     param_max = float(np.max(pso_data['parameters'][:, i]))
                     if param_min != param_max:
-                        sliders.append(create_slider(name,  # Just the name, no "Param 1" prefix
+                        sliders.append(create_slider(name,
                                                    {'type': 'param-slider', 'index': i},
                                                    param_min, param_max,
                                                    param_index=i,
                                                    show_plot=pso_data.get('show_param_plots', True),
                                                    filter_mask=filter_mask))
 
-        # Objective sliders - use just the objective name
+        # Objective sliders
         if (pso_data['objectives'] is not None and
             len(pso_data['objectives']) > 0 and
             len(pso_data['obj_names']) > 0):
@@ -175,7 +171,7 @@ def create_sliders():
                     obj_min = float(np.min(pso_data['objectives'][:, i]))
                     obj_max = float(np.max(pso_data['objectives'][:, i]))
                     if obj_min != obj_max:
-                        sliders.append(create_slider(name,  # Just the name, no "Obj 1" prefix
+                        sliders.append(create_slider(name,
                                                    {'type': 'obj-slider', 'index': i},
                                                    obj_min, obj_max))
     except Exception as e:
@@ -263,7 +259,7 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
                         colors.append('lightgray')
                         sizes.append(3)
                         symbols.append('circle')
-                        opacities.append(0.2)  # Faded instead of very transparent
+                        opacities.append(0.2)  
                         continue
 
                     if idx in selected_indices:
@@ -539,7 +535,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
         pso_data['activity_log'] = []
         pso_data['max_objectives'] = total_columns
         pso_data['displayed_objectives'] = list(range(num_objectives))
-        pso_data['show_param_plots'] = True  # Reset to show plots by default
+        pso_data['show_param_plots'] = True 
 
         if len(param_data) > 0 and param_data.shape[1] > 0:
             pso_data['lb'] = np.min(param_data, axis=0)
@@ -613,7 +609,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
             triggered_id = None
         else:
             trigger = ctx.triggered[0]['prop_id'].split('.')[0]
-            triggered_id = ctx.triggered[0]['prop_id'] # Get the full ID including property
+            triggered_id = ctx.triggered[0]['prop_id'] 
 
         displayed_objectives, displayed_names = get_displayed_objectives()
 
@@ -622,8 +618,6 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
             empty_fig.update_layout(title="No data available")
             return empty_fig, "No data", "No data", []
 
-        # --- SELECTION HANDLING LOGIC ---
-        # Handle drag selection first and give it priority
         if triggered_id == 'main-plot.selectedData' and selected_data and selected_data.get('points'):
             new_selection = set()
             for point in selected_data['points']:
@@ -633,10 +627,9 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                         new_selection.add(idx)
             if new_selection != pso_data['selected_indices']:
                 pso_data['selected_indices'] = new_selection
-                pso_data['current_clicked_point'] = None  # Clear single clicked point on drag select
+                pso_data['current_clicked_point'] = None
                 log_activity(f"Selected {len(new_selection)} points via drag selection")
 
-        # Handle single click only if main-plot.clickData was the primary trigger
         elif triggered_id == 'main-plot.clickData' and click_data and click_data.get('points'):
             clicked_point = click_data['points'][0]
             if 'customdata' in clicked_point and isinstance(clicked_point['customdata'], int):
@@ -647,13 +640,12 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                         pso_data['selected_indices'].remove(point_id)
                         log_activity(f"Deselected point #{point_id}")
                     else:
-                        # If a single click occurs and there's a multi-selection, clear it first
                         if len(pso_data['selected_indices']) > 1:
                             pso_data['selected_indices'] = set()
                             log_activity("Cleared multi-selection on single click")
                         pso_data['selected_indices'].add(point_id)
                         log_activity(f"Selected point #{point_id}")
-                    pso_data['current_clicked_point'] = point_id  # Store clicked point
+                    pso_data['current_clicked_point'] = point_id
         # --- END SELECTION HANDLING ---
 
         valid_selected = {idx for idx in pso_data['selected_indices']
@@ -855,11 +847,11 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                 obj_names = pso_data.get('obj_names', [f'Obj_{i}' for i in range(selected_objectives.shape[1])])
                 obj_avg_display = [html.P("Average Objective Values:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'})]
                 for i, name in enumerate(obj_names):
-                    if selected_objectives.shape[0] > 0: # Avoid mean of empty slice
+                    if selected_objectives.shape[0] > 0:
                         avg_val = np.mean(selected_objectives[:, i])
                         obj_avg_display.append(html.P(f"{name}: {avg_val:.4f}", style={'fontSize': '11px', 'margin': '2px 0'}))
                 
-                # Calculate aggregated parameter values (if available)
+                # Calculate aggregated parameter values
                 param_avg_display = html.Div()
                 if current_parameters is not None and len(current_parameters) > 0:
                     selected_parameters = current_parameters[selected_indices_list]
@@ -867,7 +859,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                     
                     param_avg_display_list = [html.P("Average Parameter Values:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'})]
                     for i, name in enumerate(param_names):
-                        if selected_parameters.shape[0] > 0: # Avoid mean of empty slice
+                        if selected_parameters.shape[0] > 0:
                             avg_val = np.mean(selected_parameters[:, i])
                             param_avg_display_list.append(html.P(f"{name}: {avg_val:.4f}", style={'fontSize': '11px', 'margin': '2px 0'}))
                     param_avg_display = html.Div(param_avg_display_list)
@@ -881,7 +873,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                            style={'fontWeight': 'bold', 'color': 'darkblue'}),
                     html.Hr(style={'margin': '5px 0'}),
                     html.Div(obj_avg_display),
-                    param_avg_display # This will be an empty Div if no params
+                    param_avg_display
                 ])
 
             elif display_point_id is not None:
@@ -918,7 +910,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                            style={'fontSize': '11px', 'margin': '2px 0'})
                 ])
 
-                # Create parameter values display (if available)
+                # Create parameter values display
                 param_display = html.Div()
                 if param_values is not None and len(param_values) > 0:
                     param_display = html.Div([
@@ -965,7 +957,6 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
 
         return error_fig, error_status, error_activity, error_log
 
-# Add separate callback to handle slider updates when reset is clicked
 @app.callback(
     Output('slider-container', 'children', allow_duplicate=True),
     [Input('reset-sliders-btn', 'n_clicks'),
