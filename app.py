@@ -130,6 +130,9 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
     num_obj = displayed_objectives.shape[1]
     obj_names = displayed_names
 
+    if target_point_id >= len(displayed_objectives):
+        target_point_id = 0
+
     pareto_mask = filter_pareto_front(displayed_objectives)
 
     subplot_titles = []
@@ -182,7 +185,13 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
                         colors.append('blue' if pareto_mask[idx] else 'lightblue')
                         sizes.append(6 if pareto_mask[idx] else 4)
                     
-                    symbols.append('circle')
+                    if idx == target_point_id:
+                        colors[-1] = 'darkred'
+                        sizes[-1] = 12
+                        symbols.append('star')
+                    else:
+                        symbols.append('circle')
+                    
                     opacities.append(0.8)
 
                 fig.add_trace(
@@ -231,6 +240,7 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
         "Blue: Pareto Optimal<br>"
         "Light Blue: Regular<br>"
         "Red: Selected<br>"
+        "Star: Target"
     )
     
     fig.add_annotation(
@@ -308,10 +318,15 @@ app.layout = dbc.Container([
                             ], width=3),
                             dbc.Col([
                                 dbc.Button("Reset Data", id='reset-data-btn', color="secondary", size='sm', style={'width': '100%'})
-                            ], width=3),
+                            ], width=2),
                             dbc.Col([
                                 dbc.Button("Clear Selection", id='clear-selection-btn', color="warning", size='sm', style={'width': '100%'})
-                            ], width=3)
+                            ], width=2),
+                            dbc.Col([
+                                dbc.InputGroup([
+                                    dbc.Input(id='target-input', type='number', value=0, min=0, size='sm', placeholder="Target ID"),
+                                ])
+                            ], width=2)
                         ]),
                         
                         html.Div(id='status-display', className="mt-3 p-2 bg-light rounded")
@@ -363,6 +378,7 @@ app.layout.children.append(dcc.Store(id='selection-store', data={'selected_indic
     [Output('file-info', 'children'),
      Output('slider-container', 'children'),
      Output('control-panels', 'style'),
+     Output('target-input', 'max'),
      Output('num-objectives', 'max')],
     [Input('upload-data', 'contents'),
      Input('apply-obj-selection-btn', 'n_clicks'),
@@ -375,7 +391,7 @@ app.layout.children.append(dcc.Store(id='selection-store', data={'selected_indic
 )
 def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, reset_clicks, filename, num_objectives_input):
     if contents is None:
-        return '', [], {'display': 'none'}, 2
+        return '', [], {'display': 'none'}, 0, 2
 
     try:
         ctx = callback_context
@@ -399,9 +415,9 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
                     ], className="mb-0")
                 ], color="success")
 
-                return file_info, sliders, {'display': 'block'}, len(pso_data['param_names']) + len(pso_data['obj_names'])
+                return file_info, sliders, {'display': 'block'}, len(pso_data['objectives']) - 1, len(pso_data['param_names']) + len(pso_data['obj_names'])
             else:
-                return '', [], {'display': 'none'}, 2
+                return '', [], {'display': 'none'}, 0, 2
 
         content_type, content_string = contents.split(',')
         decoded = base64.b64decode(content_string)
@@ -467,11 +483,11 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
 
         log_activity(f"Loaded {filename}: {len(df)} points, {len(param_cols)} parameters, {len(obj_cols)} objectives")
 
-        return file_info, sliders, {'display': 'block'}, total_columns
+        return file_info, sliders, {'display': 'block'}, len(obj_data) - 1, total_columns
 
     except Exception as e:
         error_msg = dbc.Alert(f"Error loading file: {str(e)}", color="danger")
-        return error_msg, [], {'display': 'none'}, 2
+        return error_msg, [], {'display': 'none'}, 0, 2
 
 @app.callback(
     [Output('main-plot', 'figure'),
@@ -481,6 +497,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
     [Input('upload-data', 'contents'),
      Input({'type': 'param-slider', 'index': ALL}, 'value'),
      Input({'type': 'obj-slider', 'index': ALL}, 'value'),
+     Input('target-input', 'value'),
      Input('selection-store', 'data'),
      Input('main-plot', 'selectedData'),
      Input('main-plot', 'clickData'),
@@ -492,7 +509,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
     [State('selection-store', 'data')],
     prevent_initial_call=False
 )
-def update_visualization(contents, param_slider_values, obj_slider_values, 
+def update_visualization(contents, param_slider_values, obj_slider_values, target_id,
                         selection_store, selected_data, click_data, 
                         clear_clicks, delete_clicks, keep_clicks, reset_clicks, obj_selection_clicks,
                         current_selection_store):
@@ -629,6 +646,10 @@ def update_visualization(contents, param_slider_values, obj_slider_values,
                 pso_data['selected_indices'] = new_selection
                 log_activity(f"Selected {len(new_selection)} points via drag selection")
 
+        current_data_length = len(displayed_objectives)
+        if target_id is None or target_id >= current_data_length or target_id < 0:
+            target_id = 0
+
         current_objectives = displayed_objectives.copy()
         current_parameters = (pso_data['parameters'].copy() 
                             if pso_data['parameters'] is not None and len(pso_data['parameters']) > 0 
@@ -674,7 +695,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values,
             fig = create_interactive_scatter_matrix(
                 current_objectives, 
                 pso_data.get('pareto_objectives', np.array([])), 
-                0,  # No target point functionality
+                target_id, 
                 pso_data['selected_indices'],
                 (pso_data['obj_mins'], pso_data['obj_maxs']) if 'obj_mins' in pso_data else None,
                 filter_mask
@@ -696,9 +717,10 @@ def update_visualization(contents, param_slider_values, obj_slider_values,
             }
             
             status_content = dbc.Row([
-                dbc.Col(html.Strong(f"Total: {stats['total']}"), width=3),
-                dbc.Col(html.Strong(f"Pareto: {stats['pareto']}", style={'color': 'blue'}), width=3),
-                dbc.Col(html.Strong(f"Selected: {stats['selected']}", style={'color': 'red'}), width=3),
+                dbc.Col(html.Strong(f"Total: {stats['total']}"), width=2),
+                dbc.Col(html.Strong(f"Pareto: {stats['pareto']}", style={'color': 'blue'}), width=2),
+                dbc.Col(html.Strong(f"Selected: {stats['selected']}", style={'color': 'red'}), width=2),
+                dbc.Col(html.Strong(f"Target: #{target_id}", style={'color': 'darkred'}), width=3),
                 dbc.Col(html.Strong(f"Objectives: {stats['objectives']}", style={'color': 'green'}), width=3)
             ])
         except Exception:
@@ -708,7 +730,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values,
         try:
             activity_content = "No point information available"
             
-            # Priority: clicked point > multiple selection > single selection
+            # Priority: clicked point > multiple selection > single selection > target
             display_point_id = None
             display_type = "none"
             
@@ -721,6 +743,9 @@ def update_visualization(contents, param_slider_values, obj_slider_values,
             elif len(pso_data['selected_indices']) == 1:
                 display_point_id = list(pso_data['selected_indices'])[0]
                 display_type = "single_selected"
+            elif target_id < len(current_objectives):
+                display_point_id = target_id
+                display_type = "target"
             
             if display_type == "multiple":
                 # Show summary statistics for multiple selected points
@@ -770,9 +795,12 @@ def update_visualization(contents, param_slider_values, obj_slider_values,
                 if display_type == "clicked":
                     point_label = f"Clicked Point #{display_point_id}"
                     color = 'purple'
-                else:  # single_selected
+                elif display_type == "single_selected":
                     point_label = f"Selected Point #{display_point_id}"
                     color = 'red'
+                else:  # target
+                    point_label = f"Target Point #{display_point_id}"
+                    color = 'darkred'
                 
                 # Create objective values display
                 obj_display = html.Div([
@@ -798,7 +826,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values,
                     html.Hr(style={'margin': '5px 0'}),
                     obj_display,
                     param_display,
-                    html.P(f"Distance to Ideal: {ideal_distance:.4f}", 
+                    html.P(f"Ideal Distribution: {ideal_distance:.4f}", 
                            style={'fontSize': '11px', 'fontWeight': 'bold', 'color': 'darkgreen'})
                 ])
                 
