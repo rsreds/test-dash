@@ -130,9 +130,6 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
     num_obj = displayed_objectives.shape[1]
     obj_names = displayed_names
 
-    if target_point_id >= len(displayed_objectives):
-        target_point_id = 0
-
     pareto_mask = filter_pareto_front(displayed_objectives)
 
     subplot_titles = []
@@ -185,13 +182,7 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
                         colors.append('blue' if pareto_mask[idx] else 'lightblue')
                         sizes.append(6 if pareto_mask[idx] else 4)
                     
-                    if idx == target_point_id:
-                        colors[-1] = 'darkred'
-                        sizes[-1] = 12
-                        symbols.append('star')
-                    else:
-                        symbols.append('circle')
-                    
+                    symbols.append('circle')
                     opacities.append(0.8)
 
                 fig.add_trace(
@@ -240,7 +231,6 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
         "Blue: Pareto Optimal<br>"
         "Light Blue: Regular<br>"
         "Red: Selected<br>"
-        "Star: Target"
     )
     
     fig.add_annotation(
@@ -540,10 +530,104 @@ def update_visualization(contents, param_slider_values, obj_slider_values,
                     pso_data['current_clicked_point'] = point_id  # Store clicked point
                     if point_id in pso_data['selected_indices']:
                         pso_data['selected_indices'].remove(point_id)
-                        log_activity(f"Selected {len(new_selection)} points via drag selection")
+                        log_activity(f"Deselected point #{point_id}")
+                    else:
+                        pso_data['selected_indices'].add(point_id)
+                        log_activity(f"Selected point #{point_id}")
 
-        current_data_length = len(displayed_objectives)
-        target_id = 0  # Remove target functionality
+        # Handle button clicks
+        if 'clear-selection-btn' in trigger and clear_clicks:
+            pso_data['selected_indices'] = set()
+            pso_data['current_clicked_point'] = None
+            log_activity("Cleared selection")
+            
+        elif 'delete-selected-btn' in trigger and delete_clicks:
+            if pso_data['selected_indices'] and len(displayed_objectives) > 0:
+                count = len(pso_data['selected_indices'])
+                keep_mask = np.ones(len(pso_data['objectives']), dtype=bool)
+                for idx in pso_data['selected_indices']:
+                    if 0 <= idx < len(pso_data['objectives']):
+                        keep_mask[idx] = False
+                
+                if np.any(keep_mask):
+                    pso_data['objectives'] = pso_data['objectives'][keep_mask]
+                    if pso_data['parameters'] is not None and len(pso_data['parameters']) > 0:
+                        pso_data['parameters'] = pso_data['parameters'][keep_mask]
+                    
+                    pso_data['selected_indices'] = set()
+                    pso_data['current_clicked_point'] = None
+                    
+                    if len(pso_data['objectives']) > 0:
+                        pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
+                        pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
+                    
+                    if (pso_data['parameters'] is not None and 
+                        len(pso_data['parameters']) > 0 and 
+                        pso_data['parameters'].shape[1] > 0):
+                        pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
+                        pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+                    
+                    log_activity(f"Deleted {count} points, {len(pso_data['objectives'])} remaining")
+                else:
+                    log_activity("Cannot delete all points")
+            
+        elif 'keep-selected-btn' in trigger and keep_clicks:
+            if pso_data['selected_indices'] and len(displayed_objectives) > 0:
+                valid_indices = [idx for idx in pso_data['selected_indices'] 
+                               if 0 <= idx < len(pso_data['objectives'])]
+                
+                if valid_indices:
+                    pso_data['objectives'] = pso_data['objectives'][valid_indices]
+                    if pso_data['parameters'] is not None and len(pso_data['parameters']) > 0:
+                        pso_data['parameters'] = pso_data['parameters'][valid_indices]
+                    
+                    pso_data['selected_indices'] = set()
+                    pso_data['current_clicked_point'] = None
+                    
+                    if len(pso_data['objectives']) > 0:
+                        pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
+                        pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
+                    
+                    if (pso_data['parameters'] is not None and 
+                        len(pso_data['parameters']) > 0 and 
+                        pso_data['parameters'].shape[1] > 0):
+                        pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
+                        pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+                    
+                    log_activity(f"Kept only {len(valid_indices)} selected points")
+                else:
+                    log_activity("No valid selected points to keep")
+                
+        elif 'reset-data-btn' in trigger and reset_clicks:
+            if 'original_objectives' in pso_data and pso_data['original_objectives'] is not None:
+                pso_data['objectives'] = pso_data['original_objectives'].copy()
+                if 'original_parameters' in pso_data and pso_data['original_parameters'] is not None:
+                    pso_data['parameters'] = pso_data['original_parameters'].copy()
+                pso_data['selected_indices'] = set()
+                pso_data['current_clicked_point'] = None
+                
+                if len(pso_data['objectives']) > 0:
+                    pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
+                    pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
+                
+                if (pso_data['parameters'] is not None and 
+                    len(pso_data['parameters']) > 0 and 
+                    pso_data['parameters'].shape[1] > 0):
+                    pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
+                    pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+                
+                log_activity("Reset data to original")
+            
+        elif 'main-plot' in trigger and selected_data and selected_data.get('points'):
+            new_selection = set()
+            for point in selected_data['points']:
+                if 'customdata' in point and isinstance(point['customdata'], int):
+                    idx = point['customdata']
+                    if 0 <= idx < len(pso_data['objectives']):
+                        new_selection.add(idx)
+            if new_selection != pso_data['selected_indices']:
+                pso_data['selected_indices'] = new_selection
+                log_activity(f"Selected {len(new_selection)} points via drag selection")
 
         current_objectives = displayed_objectives.copy()
         current_parameters = (pso_data['parameters'].copy() 
@@ -590,7 +674,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values,
             fig = create_interactive_scatter_matrix(
                 current_objectives, 
                 pso_data.get('pareto_objectives', np.array([])), 
-                target_id, 
+                0,  # No target point functionality
                 pso_data['selected_indices'],
                 (pso_data['obj_mins'], pso_data['obj_maxs']) if 'obj_mins' in pso_data else None,
                 filter_mask
@@ -760,101 +844,4 @@ def update_selection_store(selected_data, current_data):
     return current_data
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8080, debug=True)(f"Deselected point #{point_id}")
-else:
-    pso_data['selected_indices'].add(point_id)
-    log_activity(f"Selected point #{point_id}")
-
-        # Handle button clicks
-        if 'clear-selection-btn' in trigger and clear_clicks:
-            pso_data['selected_indices'] = set()
-            pso_data['current_clicked_point'] = None
-            log_activity("Cleared selection")
-            
-        elif 'delete-selected-btn' in trigger and delete_clicks:
-            if pso_data['selected_indices'] and len(displayed_objectives) > 0:
-                count = len(pso_data['selected_indices'])
-                keep_mask = np.ones(len(pso_data['objectives']), dtype=bool)
-                for idx in pso_data['selected_indices']:
-                    if 0 <= idx < len(pso_data['objectives']):
-                        keep_mask[idx] = False
-                
-                if np.any(keep_mask):
-                    pso_data['objectives'] = pso_data['objectives'][keep_mask]
-                    if pso_data['parameters'] is not None and len(pso_data['parameters']) > 0:
-                        pso_data['parameters'] = pso_data['parameters'][keep_mask]
-                    
-                    pso_data['selected_indices'] = set()
-                    pso_data['current_clicked_point'] = None
-                    
-                    if len(pso_data['objectives']) > 0:
-                        pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
-                        pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
-                    
-                    if (pso_data['parameters'] is not None and 
-                        len(pso_data['parameters']) > 0 and 
-                        pso_data['parameters'].shape[1] > 0):
-                        pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
-                        pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
-                    
-                    log_activity(f"Deleted {count} points, {len(pso_data['objectives'])} remaining")
-                else:
-                    log_activity("Cannot delete all points")
-            
-        elif 'keep-selected-btn' in trigger and keep_clicks:
-            if pso_data['selected_indices'] and len(displayed_objectives) > 0:
-                valid_indices = [idx for idx in pso_data['selected_indices'] 
-                               if 0 <= idx < len(pso_data['objectives'])]
-                
-                if valid_indices:
-                    pso_data['objectives'] = pso_data['objectives'][valid_indices]
-                    if pso_data['parameters'] is not None and len(pso_data['parameters']) > 0:
-                        pso_data['parameters'] = pso_data['parameters'][valid_indices]
-                    
-                    pso_data['selected_indices'] = set()
-                    pso_data['current_clicked_point'] = None
-                    
-                    if len(pso_data['objectives']) > 0:
-                        pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
-                        pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
-                    
-                    if (pso_data['parameters'] is not None and 
-                        len(pso_data['parameters']) > 0 and 
-                        pso_data['parameters'].shape[1] > 0):
-                        pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
-                        pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
-                    
-                    log_activity(f"Kept only {len(valid_indices)} selected points")
-                else:
-                    log_activity("No valid selected points to keep")
-                
-        elif 'reset-data-btn' in trigger and reset_clicks:
-            if 'original_objectives' in pso_data and pso_data['original_objectives'] is not None:
-                pso_data['objectives'] = pso_data['original_objectives'].copy()
-                if 'original_parameters' in pso_data and pso_data['original_parameters'] is not None:
-                    pso_data['parameters'] = pso_data['original_parameters'].copy()
-                pso_data['selected_indices'] = set()
-                pso_data['current_clicked_point'] = None
-                
-                if len(pso_data['objectives']) > 0:
-                    pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
-                    pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
-                
-                if (pso_data['parameters'] is not None and 
-                    len(pso_data['parameters']) > 0 and 
-                    pso_data['parameters'].shape[1] > 0):
-                    pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
-                    pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
-                
-                log_activity("Reset data to original")
-            
-        elif 'main-plot' in trigger and selected_data and selected_data.get('points'):
-            new_selection = set()
-            for point in selected_data['points']:
-                if 'customdata' in point and isinstance(point['customdata'], int):
-                    idx = point['customdata']
-                    if 0 <= idx < len(pso_data['objectives']):
-                        new_selection.add(idx)
-            if new_selection != pso_data['selected_indices']:
-                pso_data['selected_indices'] = new_selection
-                log_activity
+    app.run(host="0.0.0.0", port=8080, debug=True)
