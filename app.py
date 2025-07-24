@@ -1,3 +1,4 @@
+#works perfectly with adjustments
 import base64
 import io
 import numpy as np
@@ -10,6 +11,7 @@ from datetime import datetime
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 app.title = "Interactive CSV PSO Visualizer"
+app.config.suppress_callback_exceptions = True
 
 # Global storage for PSO data
 pso_data = {
@@ -966,9 +968,22 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
 )
 def update_sliders_on_reset(reset_clicks, toggle_clicks):
     """Update sliders when reset button is clicked or plots are toggled"""
-    if reset_clicks or toggle_clicks:
+    try:
+        ctx = callback_context
+        if not ctx.triggered:
+            return create_sliders()
+        
+        trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+        
+        if trigger == 'toggle-param-plots-btn':
+            pso_data['show_param_plots'] = not pso_data.get('show_param_plots', True)
+            log_activity(f"Parameter plots {'shown' if pso_data['show_param_plots'] else 'hidden'}")
+        elif trigger == 'reset-sliders-btn':
+            log_activity("Reset all sliders to default ranges")
+        
         return create_sliders()
-    return create_sliders()
+    except Exception as e:
+        return create_sliders()
 
 # Add callback to update parameter mini plots when filters change
 @app.callback(
