@@ -1,4 +1,4 @@
-# Complete Fixed Interactive CSV PSO Visualizer
+#works perfectly with critical fixes
 import base64
 import io
 import numpy as np
@@ -18,6 +18,7 @@ pso_data = {
     'parameters': None,
     'objectives': None,
     'original_objectives': None,
+    'original_parameters': None,
     'pareto_objectives': None,
     'pareto_positions': None,
     'param_names': [],
@@ -31,8 +32,101 @@ pso_data = {
     'displayed_objectives': None,
     'max_objectives': 0,
     'show_param_plots': True,
-    'slider_update_trigger': 0
+    'data_version': 0  # Track data changes for synchronization
 }
+
+def validate_data_consistency():
+    """Ensure all data arrays are consistent in length and state"""
+    try:
+        if pso_data['objectives'] is None:
+            return True
+            
+        obj_len = len(pso_data['objectives'])
+        
+        # Check parameters consistency
+        if pso_data['parameters'] is not None:
+            if len(pso_data['parameters']) != obj_len:
+                log_activity(f"Data inconsistency: objectives {obj_len} vs parameters {len(pso_data['parameters'])}")
+                return False
+        
+        # Validate selected indices
+        valid_indices = {idx for idx in pso_data['selected_indices'] 
+                        if isinstance(idx, (int, np.integer)) and 0 <= idx < obj_len}
+        if len(valid_indices) != len(pso_data['selected_indices']):
+            pso_data['selected_indices'] = valid_indices
+            log_activity(f"Cleaned invalid selected indices")
+        
+        # Validate current clicked point
+        if (pso_data['current_clicked_point'] is not None and 
+            (not isinstance(pso_data['current_clicked_point'], (int, np.integer)) or
+             pso_data['current_clicked_point'] >= obj_len or
+             pso_data['current_clicked_point'] < 0)):
+            pso_data['current_clicked_point'] = None
+            log_activity("Reset invalid clicked point")
+        
+        return True
+    except Exception as e:
+        log_activity(f"Data validation error: {str(e)}")
+        return False
+
+def update_derived_data():
+    """Update all derived data after main data changes"""
+    try:
+        if pso_data['objectives'] is None or len(pso_data['objectives']) == 0:
+            pso_data['pareto_objectives'] = None
+            pso_data['pareto_positions'] = None
+            pso_data['obj_mins'] = None
+            pso_data['obj_maxs'] = None
+            return
+        
+        # Update objective bounds
+        pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
+        pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
+        
+        # Update parameter bounds if available
+        if (pso_data['parameters'] is not None and 
+            len(pso_data['parameters']) > 0 and 
+            pso_data['parameters'].shape[1] > 0):
+            pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
+            pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+        
+        # Update Pareto front
+        pareto_mask = filter_pareto_front(pso_data['objectives'])
+        pso_data['pareto_objectives'] = pso_data['objectives'][pareto_mask]
+        
+        if (pso_data['parameters'] is not None and 
+            len(pso_data['parameters']) > 0):
+            pso_data['pareto_positions'] = pso_data['parameters'][pareto_mask]
+        else:
+            pso_data['pareto_positions'] = None
+        
+        # Increment version for change tracking
+        pso_data['data_version'] += 1
+        
+    except Exception as e:
+        log_activity(f"Error updating derived data: {str(e)}")
+
+def safe_array_access(array, indices, axis=0):
+    """Safely access array with bounds checking"""
+    if array is None or len(array) == 0:
+        return None
+    
+    try:
+        if isinstance(indices, (list, np.ndarray)):
+            # Filter valid indices
+            valid_indices = [idx for idx in indices 
+                           if isinstance(idx, (int, np.integer)) and 0 <= idx < array.shape[axis]]
+            if not valid_indices:
+                return None
+            return array[valid_indices]
+        else:
+            # Single index
+            if isinstance(indices, (int, np.integer)) and 0 <= indices < array.shape[axis]:
+                return array[indices]
+            return None
+    except Exception as e:
+        log_activity(f"Array access error: {str(e)}")
+        return None
 
 def log_activity(message):
     """Add message to activity log with timestamp"""
@@ -42,7 +136,7 @@ def log_activity(message):
         if len(pso_data['activity_log']) > 50:
             pso_data['activity_log'] = pso_data['activity_log'][-50:]
     except Exception:
-        pass  # Silently handle logging errors
+        pass  # Don't let logging errors break the app
 
 def get_displayed_objectives():
     """Get the currently displayed objectives"""
@@ -51,31 +145,25 @@ def get_displayed_objectives():
     return pso_data['objectives'], pso_data['obj_names']
 
 def create_parameter_mini_plot(param_data, param_name, param_index, filter_mask=None):
-    """Create a small scatter plot for parameter distribution"""
+    """Create a small scatter plot for parameter distribution with bounds checking"""
     try:
-        if param_data is None or len(param_data) == 0 or param_index >= param_data.shape[1]:
+        if (param_data is None or len(param_data) == 0 or 
+            param_index >= param_data.shape[1] or param_index < 0):
             return go.Figure()
         
-        if filter_mask is None or len(filter_mask) != len(param_data):
+        if filter_mask is None:
+            filter_mask = np.ones(len(param_data), dtype=bool)
+        
+        # Ensure filter_mask length matches param_data
+        if len(filter_mask) != len(param_data):
             filter_mask = np.ones(len(param_data), dtype=bool)
         
         param_values = param_data[:, param_index]
         y_values = np.arange(len(param_values))
         
-        # Create colors and properties safely
-        colors = []
-        opacities = []
-        sizes = []
-        
-        for i, mask in enumerate(filter_mask):
-            if mask:
-                colors.append('blue')
-                opacities.append(0.8)
-                sizes.append(4)
-            else:
-                colors.append('lightgray')
-                opacities.append(0.3)
-                sizes.append(2)
+        colors = ['blue' if mask else 'lightgray' for mask in filter_mask]
+        opacities = [0.8 if mask else 0.3 for mask in filter_mask]
+        sizes = [4 if mask else 2 for mask in filter_mask]
         
         fig = go.Figure()
         fig.add_trace(
@@ -104,15 +192,16 @@ def create_parameter_mini_plot(param_data, param_name, param_index, filter_mask=
         )
         
         return fig
-    except Exception:
-        return go.Figure()  # Return empty figure on any error
+    except Exception as e:
+        log_activity(f"Error creating mini plot for {param_name}: {str(e)}")
+        return go.Figure()
 
 def create_slider(title, slider_id, min_val, max_val, param_index=None, show_plot=True, filter_mask=None):
     """Create slider with optional mini parameter plot"""
     try:
         # Ensure valid range
-        if min_val == max_val:
-            max_val = min_val + 0.01
+        if not (np.isfinite(min_val) and np.isfinite(max_val)) or min_val >= max_val:
+            min_val, max_val = 0.0, 1.0
         
         slider_div = html.Div([
             html.P(f"Filter by {title}:", style={'marginBottom': '5px', 'marginTop': '15px', 'fontSize': '14px'}),
@@ -120,7 +209,7 @@ def create_slider(title, slider_id, min_val, max_val, param_index=None, show_plo
                 id=slider_id,
                 min=min_val,
                 max=max_val,
-                step=(max_val - min_val) / 100,
+                step=(max_val - min_val) / 100 if max_val > min_val else 0.01,
                 value=[min_val, max_val],
                 marks={min_val: f'{min_val:.1f}', max_val: f'{max_val:.1f}'},
                 tooltip={"placement": "bottom", "always_visible": False},
@@ -130,8 +219,9 @@ def create_slider(title, slider_id, min_val, max_val, param_index=None, show_plo
         
         # Add mini plot for parameters if requested
         if (param_index is not None and show_plot and 
-            pso_data['parameters'] is not None and 
-            param_index < pso_data['parameters'].shape[1]):
+            pso_data['parameters'] is not None and
+            isinstance(param_index, (int, np.integer)) and
+            0 <= param_index < pso_data['parameters'].shape[1]):
             
             mini_plot = dcc.Graph(
                 id={'type': 'param-mini-plot', 'index': param_index},
@@ -142,14 +232,19 @@ def create_slider(title, slider_id, min_val, max_val, param_index=None, show_plo
             return html.Div([mini_plot, slider_div])
         
         return slider_div
-    except Exception:
-        return html.Div(f"Error creating slider for {title}")
+    except Exception as e:
+        log_activity(f"Error creating slider for {title}: {str(e)}")
+        return html.Div(f"Slider error: {title}")
 
 def create_sliders():
-    """Create sliders based on current data"""
+    """Create sliders based on current data with error handling"""
     sliders = []
     
     try:
+        # Validate data first
+        if not validate_data_consistency():
+            return [html.Div("Data inconsistency detected. Please reload file.", style={'color': 'red'})]
+        
         # Add control buttons at the top
         control_buttons = html.Div([
             dbc.Row([
@@ -165,13 +260,8 @@ def create_sliders():
         ])
         sliders.append(control_buttons)
         
-        # Check if we have valid data
-        if (pso_data['objectives'] is None or 
-            len(pso_data['objectives']) == 0):
-            return sliders + [html.Div("No data available for sliders")]
-        
-        # Create a default filter mask
-        filter_mask = np.ones(len(pso_data['objectives']), dtype=bool)
+        # Create a filter mask for current filtering state
+        filter_mask = np.ones(len(pso_data['objectives']) if pso_data['objectives'] is not None else 0, dtype=bool)
         
         # Parameter sliders
         if (pso_data['parameters'] is not None and 
@@ -180,25 +270,22 @@ def create_sliders():
             len(pso_data['param_names']) > 0):
             
             sliders.append(html.H6("Parameter Filters:", className="mt-3 mb-2"))
-            
-            num_params = min(len(pso_data['param_names']), pso_data['parameters'].shape[1])
-            for i in range(num_params):
-                try:
-                    name = pso_data['param_names'][i]
-                    param_min = float(np.min(pso_data['parameters'][:, i]))
-                    param_max = float(np.max(pso_data['parameters'][:, i]))
-                    
-                    if param_min != param_max:  # Only create slider if there's variation
-                        sliders.append(create_slider(
-                            name,
-                            {'type': 'param-slider', 'index': i}, 
-                            param_min, param_max, 
-                            param_index=i, 
-                            show_plot=pso_data.get('show_param_plots', True),
-                            filter_mask=filter_mask
-                        ))
-                except Exception as e:
-                    sliders.append(html.Div(f"Error with parameter {i}: {str(e)}", style={'color': 'red', 'fontSize': '12px'}))
+            for i, name in enumerate(pso_data['param_names']):
+                if i < pso_data['parameters'].shape[1]:
+                    try:
+                        param_col = pso_data['parameters'][:, i]
+                        param_min = float(np.min(param_col))
+                        param_max = float(np.max(param_col))
+                        
+                        if np.isfinite(param_min) and np.isfinite(param_max) and param_min < param_max:
+                            sliders.append(create_slider(name,
+                                                       {'type': 'param-slider', 'index': i}, 
+                                                       param_min, param_max, 
+                                                       param_index=i, 
+                                                       show_plot=pso_data.get('show_param_plots', True),
+                                                       filter_mask=filter_mask))
+                    except Exception as e:
+                        log_activity(f"Error creating parameter slider {i}: {str(e)}")
 
         # Objective sliders
         if (pso_data['objectives'] is not None and 
@@ -206,32 +293,30 @@ def create_sliders():
             len(pso_data['obj_names']) > 0):
             
             sliders.append(html.H6("Objective Filters:", className="mt-3 mb-2"))
-            
-            num_objs = min(len(pso_data['obj_names']), pso_data['objectives'].shape[1])
-            for i in range(num_objs):
-                try:
-                    name = pso_data['obj_names'][i]
-                    obj_min = float(np.min(pso_data['objectives'][:, i]))
-                    obj_max = float(np.max(pso_data['objectives'][:, i]))
-                    
-                    if obj_min != obj_max:  # Only create slider if there's variation
-                        sliders.append(create_slider(
-                            name,
-                            {'type': 'obj-slider', 'index': i}, 
-                            obj_min, obj_max
-                        ))
-                except Exception as e:
-                    sliders.append(html.Div(f"Error with objective {i}: {str(e)}", style={'color': 'red', 'fontSize': '12px'}))
-                    
+            for i, name in enumerate(pso_data['obj_names']):
+                if i < pso_data['objectives'].shape[1]:
+                    try:
+                        obj_col = pso_data['objectives'][:, i]
+                        obj_min = float(np.min(obj_col))
+                        obj_max = float(np.max(obj_col))
+                        
+                        if np.isfinite(obj_min) and np.isfinite(obj_max) and obj_min < obj_max:
+                            sliders.append(create_slider(name,
+                                                       {'type': 'obj-slider', 'index': i}, 
+                                                       obj_min, obj_max))
+                    except Exception as e:
+                        log_activity(f"Error creating objective slider {i}: {str(e)}")
+                        
     except Exception as e:
-        sliders = [html.Div(f"Critical error creating sliders: {str(e)}", style={'color': 'red'})]
+        log_activity(f"Critical error creating sliders: {str(e)}")
+        sliders = [html.Div(f"Error creating sliders: {str(e)}", style={'color': 'red'})]
     
     return sliders
 
 def filter_pareto_front(points):
-    """Calculate Pareto front from points"""
+    """Calculate Pareto front from points with error handling"""
     try:
-        if len(points) == 0: 
+        if points is None or len(points) == 0: 
             return np.array([], dtype=bool)
         
         is_pareto = np.ones(points.shape[0], dtype=bool)
@@ -241,11 +326,12 @@ def filter_pareto_front(points):
                 is_pareto[is_pareto] = ~is_dominated
                 is_pareto[i] = True
         return is_pareto
-    except Exception:
-        return np.ones(len(points), dtype=bool) if len(points) > 0 else np.array([], dtype=bool)
+    except Exception as e:
+        log_activity(f"Error calculating Pareto front: {str(e)}")
+        return np.ones(len(points) if points is not None else 0, dtype=bool)
 
 def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0, selected_indices=None, fixed_axis_ranges=None, filter_mask=None):
-    """Create interactive scatter matrix with selection capabilities"""
+    """Create interactive scatter matrix with selection capabilities and error handling"""
     try:
         if selected_indices is None:
             selected_indices = set()
@@ -263,7 +349,8 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
         num_obj = displayed_objectives.shape[1]
         obj_names = displayed_names
 
-        if target_point_id >= len(displayed_objectives):
+        # Validate target point
+        if not isinstance(target_point_id, (int, np.integer)) or target_point_id >= len(displayed_objectives) or target_point_id < 0:
             target_point_id = 0
 
         pareto_mask = filter_pareto_front(displayed_objectives)
@@ -391,8 +478,9 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
 
         return fig
     except Exception as e:
+        log_activity(f"Error creating scatter matrix: {str(e)}")
         fig = go.Figure()
-        fig.update_layout(title=f"Plot Error: {str(e)}")
+        fig.update_layout(title=f"Visualization Error: {str(e)}")
         return fig
 
 app.layout = dbc.Container([
@@ -504,12 +592,13 @@ app.layout = dbc.Container([
                 ])
             ], width=6)
         ], className="mt-3")
-    ])
+    ]),
+    
+    # Store for UI state management (replaces the problematic duplicate callback)
+    dcc.Store(id='ui-state-store', data={'slider_reset_trigger': 0, 'show_param_plots': True}),
+    dcc.Store(id='selection-store', data={'selected_indices': []})
 ], fluid=True)
 
-app.layout.children.append(dcc.Store(id='selection-store', data={'selected_indices': []}))
-
-# Main file loading callback
 @app.callback(
     [Output('file-info', 'children'),
      Output('control-panels', 'style'),
@@ -525,6 +614,7 @@ app.layout.children.append(dcc.Store(id='selection-store', data={'selected_indic
     prevent_initial_call=False
 )
 def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, reset_clicks, filename, num_objectives_input):
+    """Main data loading and processing callback with comprehensive error handling"""
     if contents is None:
         return '', {'display': 'none'}, 0, 2
 
@@ -535,8 +625,10 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
         else:
             trigger = ctx.triggered[0]['prop_id'].split('.')[0]
 
+        # Handle data modification operations
         if trigger in ['delete-selected-btn', 'keep-selected-btn', 'reset-data-btn']:
             if pso_data['objectives'] is not None:
+                
                 file_info = dbc.Alert([
                     html.H6(f"File: {pso_data['filename']}", className="alert-heading"),
                     html.P([
@@ -552,6 +644,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
             else:
                 return '', {'display': 'none'}, 0, 2
 
+        # Load new CSV file
         content_type, content_string = contents.split(',')
         decoded = base64.b64decode(content_string)
         df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
@@ -574,6 +667,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
         param_data = df[param_cols].values if param_cols else np.array([]).reshape(len(df), 0)
         obj_data = df[obj_cols].values
         
+        # Initialize all data atomically to prevent inconsistency
         pso_data['parameters'] = param_data
         pso_data['objectives'] = obj_data
         pso_data['original_objectives'] = obj_data.copy()
@@ -587,21 +681,9 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
         pso_data['max_objectives'] = total_columns
         pso_data['displayed_objectives'] = list(range(num_objectives))
         pso_data['show_param_plots'] = True
-        pso_data['slider_update_trigger'] = 0
         
-        if len(param_data) > 0 and param_data.shape[1] > 0:
-            pso_data['lb'] = np.min(param_data, axis=0)
-            pso_data['ub'] = np.max(param_data, axis=0)
-        else:
-            pso_data['lb'] = np.array([])
-            pso_data['ub'] = np.array([])
-        
-        pso_data['obj_mins'] = np.min(obj_data, axis=0)
-        pso_data['obj_maxs'] = np.max(obj_data, axis=0)
-
-        pareto_mask = filter_pareto_front(obj_data)
-        pso_data['pareto_objectives'] = obj_data[pareto_mask]
-        pso_data['pareto_positions'] = param_data[pareto_mask] if len(param_data) > 0 else np.array([])
+        # Update all derived data
+        update_derived_data()
 
         file_info = dbc.Alert([
             html.H6(f"File: {filename}", className="alert-heading"),
@@ -610,7 +692,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
                 f"Total Columns: {total_columns} | ",
                 f"Parameters: {len(param_cols)} | ",
                 f"Objectives: {len(obj_cols)} | ",
-                f"Pareto Points: {len(pso_data['pareto_objectives'])}"
+                f"Pareto Points: {len(pso_data['pareto_objectives']) if pso_data['pareto_objectives'] is not None else 0}"
             ], className="mb-0")
         ], color="success")
 
@@ -619,46 +701,17 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
         return file_info, {'display': 'block'}, len(obj_data) - 1, total_columns
 
     except Exception as e:
+        log_activity(f"Error loading file: {str(e)}")
         error_msg = dbc.Alert(f"Error loading file: {str(e)}", color="danger")
         return error_msg, {'display': 'none'}, 0, 2
 
-# Separate callback for slider creation/updates
-@app.callback(
-    Output('slider-container', 'children'),
-    [Input('upload-data', 'contents'),
-     Input('reset-sliders-btn', 'n_clicks'),
-     Input('toggle-param-plots-btn', 'n_clicks'),
-     Input('delete-selected-btn', 'n_clicks'),
-     Input('keep-selected-btn', 'n_clicks'),
-     Input('reset-data-btn', 'n_clicks'),
-     Input('apply-obj-selection-btn', 'n_clicks')],
-    prevent_initial_call=False
-)
-def update_slider_container(contents, reset_clicks, toggle_clicks, delete_clicks, keep_clicks, reset_data_clicks, obj_selection_clicks):
-    """Update slider container"""
-    try:
-        ctx = callback_context
-        if ctx.triggered:
-            trigger = ctx.triggered[0]['prop_id'].split('.')[0]
-            
-            if trigger == 'toggle-param-plots-btn' and toggle_clicks:
-                pso_data['show_param_plots'] = not pso_data.get('show_param_plots', True)
-                pso_data['slider_update_trigger'] += 1
-                log_activity(f"Parameter plots {'shown' if pso_data['show_param_plots'] else 'hidden'}")
-            elif trigger == 'reset-sliders-btn' and reset_clicks:
-                pso_data['slider_update_trigger'] += 1
-                log_activity("Reset all sliders to default ranges")
-        
-        return create_sliders()
-    except Exception as e:
-        return [html.Div(f"Slider error: {str(e)}", style={'color': 'red'})]
-
-# Main visualization callback
 @app.callback(
     [Output('main-plot', 'figure'),
      Output('status-display', 'children'),
      Output('activity-panel', 'children'),
-     Output('activity-log', 'children')],
+     Output('activity-log', 'children'),
+     Output('slider-container', 'children'),
+     Output('ui-state-store', 'data')],
     [Input('upload-data', 'contents'),
      Input({'type': 'param-slider', 'index': ALL}, 'value'),
      Input({'type': 'obj-slider', 'index': ALL}, 'value'),
@@ -670,20 +723,34 @@ def update_slider_container(contents, reset_clicks, toggle_clicks, delete_clicks
      Input('delete-selected-btn', 'n_clicks'),
      Input('keep-selected-btn', 'n_clicks'),
      Input('reset-data-btn', 'n_clicks'),
-     Input('apply-obj-selection-btn', 'n_clicks')],
-    [State('selection-store', 'data')],
+     Input('apply-obj-selection-btn', 'n_clicks'),
+     Input('reset-sliders-btn', 'n_clicks'),
+     Input('toggle-param-plots-btn', 'n_clicks')],
+    [State('selection-store', 'data'),
+     State('ui-state-store', 'data')],
     prevent_initial_call=False
 )
-def update_visualization(contents, param_slider_values, obj_slider_values, target_id,
-                        selection_store, selected_data, click_data, 
-                        clear_clicks, delete_clicks, keep_clicks, reset_clicks, obj_selection_clicks,
-                        current_selection_store):
+def update_visualization_and_ui(contents, param_slider_values, obj_slider_values, target_id,
+                               selection_store, selected_data, click_data, 
+                               clear_clicks, delete_clicks, keep_clicks, reset_clicks, 
+                               obj_selection_clicks, reset_sliders_clicks, toggle_plots_clicks,
+                               current_selection_store, current_ui_state):
+    """Unified callback for visualization and UI updates with error handling"""
     
     try:
+        # Initialize default returns
+        empty_fig = go.Figure()
+        empty_fig.update_layout(title="Upload a CSV file to begin")
+        default_ui_state = current_ui_state or {'slider_reset_trigger': 0, 'show_param_plots': True}
+        
         if pso_data['objectives'] is None or len(pso_data['objectives']) == 0:
-            empty_fig = go.Figure()
-            empty_fig.update_layout(title="Upload a CSV file to begin")
-            return empty_fig, "No data loaded", "Upload CSV file", []
+            return empty_fig, "No data loaded", "Upload CSV file", [], [], default_ui_state
+
+        # Validate data consistency
+        if not validate_data_consistency():
+            error_fig = go.Figure()
+            error_fig.update_layout(title="Data inconsistency detected")
+            return error_fig, "Data error", "Data inconsistent", [], [], default_ui_state
 
         ctx = callback_context
         if not ctx.triggered:
@@ -694,22 +761,30 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         displayed_objectives, displayed_names = get_displayed_objectives()
         
         if displayed_objectives is None or len(displayed_objectives) == 0:
-            empty_fig = go.Figure()
-            empty_fig.update_layout(title="No data available")
-            return empty_fig, "No data", "No data", []
+            return empty_fig, "No data", "No data", [], [], default_ui_state
 
-        # Clean selected indices
-        valid_selected = {idx for idx in pso_data['selected_indices'] 
-                         if isinstance(idx, int) and 0 <= idx < len(displayed_objectives)}
-        pso_data['selected_indices'] = valid_selected
+        # Handle UI state changes
+        ui_state_changed = False
+        new_ui_state = current_ui_state.copy() if current_ui_state else {'slider_reset_trigger': 0, 'show_param_plots': True}
+        
+        if 'toggle-param-plots-btn' in trigger and toggle_plots_clicks:
+            new_ui_state['show_param_plots'] = not new_ui_state.get('show_param_plots', True)
+            pso_data['show_param_plots'] = new_ui_state['show_param_plots']
+            ui_state_changed = True
+            log_activity(f"Parameter plots {'shown' if pso_data['show_param_plots'] else 'hidden'}")
+            
+        if 'reset-sliders-btn' in trigger and reset_sliders_clicks:
+            new_ui_state['slider_reset_trigger'] = new_ui_state.get('slider_reset_trigger', 0) + 1
+            ui_state_changed = True
+            log_activity("Reset all sliders to default ranges")
 
         # Handle click data to track which point was clicked
         if ('main-plot' in trigger and click_data and click_data.get('points') and 
             not (selected_data and selected_data.get('points'))):
-            try:
-                clicked_point = click_data['points'][0]
-                if 'customdata' in clicked_point and isinstance(clicked_point['customdata'], int):
-                    point_id = clicked_point['customdata']
+            clicked_point = click_data['points'][0]
+            if 'customdata' in clicked_point:
+                try:
+                    point_id = int(clicked_point['customdata'])
                     if 0 <= point_id < len(pso_data['objectives']):
                         pso_data['current_clicked_point'] = point_id
                         if point_id in pso_data['selected_indices']:
@@ -718,10 +793,10 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                         else:
                             pso_data['selected_indices'].add(point_id)
                             log_activity(f"Selected point #{point_id}")
-            except Exception:
-                pass  # Ignore click handling errors
+                except (ValueError, TypeError) as e:
+                    log_activity(f"Invalid click data: {str(e)}")
 
-        # Handle button clicks
+        # Handle button clicks with safe data operations
         if 'clear-selection-btn' in trigger and clear_clicks:
             pso_data['selected_indices'] = set()
             pso_data['current_clicked_point'] = None
@@ -729,14 +804,15 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
             
         elif 'delete-selected-btn' in trigger and delete_clicks:
             if pso_data['selected_indices'] and len(displayed_objectives) > 0:
+                count = len(pso_data['selected_indices'])
                 try:
-                    count = len(pso_data['selected_indices'])
                     keep_mask = np.ones(len(pso_data['objectives']), dtype=bool)
                     for idx in pso_data['selected_indices']:
-                        if 0 <= idx < len(pso_data['objectives']):
+                        if isinstance(idx, (int, np.integer)) and 0 <= idx < len(pso_data['objectives']):
                             keep_mask[idx] = False
                     
                     if np.any(keep_mask):
+                        # Apply mask to all related arrays atomically
                         pso_data['objectives'] = pso_data['objectives'][keep_mask]
                         if pso_data['parameters'] is not None and len(pso_data['parameters']) > 0:
                             pso_data['parameters'] = pso_data['parameters'][keep_mask]
@@ -744,15 +820,8 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                         pso_data['selected_indices'] = set()
                         pso_data['current_clicked_point'] = None
                         
-                        if len(pso_data['objectives']) > 0:
-                            pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
-                            pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
-                        
-                        if (pso_data['parameters'] is not None and 
-                            len(pso_data['parameters']) > 0 and 
-                            pso_data['parameters'].shape[1] > 0):
-                            pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
-                            pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+                        # Update all derived data
+                        update_derived_data()
                         
                         log_activity(f"Deleted {count} points, {len(pso_data['objectives'])} remaining")
                     else:
@@ -764,9 +833,10 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
             if pso_data['selected_indices'] and len(displayed_objectives) > 0:
                 try:
                     valid_indices = [idx for idx in pso_data['selected_indices'] 
-                                   if 0 <= idx < len(pso_data['objectives'])]
+                                   if isinstance(idx, (int, np.integer)) and 0 <= idx < len(pso_data['objectives'])]
                     
                     if valid_indices:
+                        # Apply selection to all related arrays atomically
                         pso_data['objectives'] = pso_data['objectives'][valid_indices]
                         if pso_data['parameters'] is not None and len(pso_data['parameters']) > 0:
                             pso_data['parameters'] = pso_data['parameters'][valid_indices]
@@ -774,15 +844,8 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                         pso_data['selected_indices'] = set()
                         pso_data['current_clicked_point'] = None
                         
-                        if len(pso_data['objectives']) > 0:
-                            pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
-                            pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
-                        
-                        if (pso_data['parameters'] is not None and 
-                            len(pso_data['parameters']) > 0 and 
-                            pso_data['parameters'].shape[1] > 0):
-                            pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
-                            pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+                        # Update all derived data
+                        update_derived_data()
                         
                         log_activity(f"Kept only {len(valid_indices)} selected points")
                     else:
@@ -791,96 +854,77 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                     log_activity(f"Error keeping points: {str(e)}")
                 
         elif 'reset-data-btn' in trigger and reset_clicks:
-            if 'original_objectives' in pso_data and pso_data['original_objectives'] is not None:
-                try:
+            try:
+                if 'original_objectives' in pso_data and pso_data['original_objectives'] is not None:
                     pso_data['objectives'] = pso_data['original_objectives'].copy()
                     if 'original_parameters' in pso_data and pso_data['original_parameters'] is not None:
                         pso_data['parameters'] = pso_data['original_parameters'].copy()
+                    
                     pso_data['selected_indices'] = set()
                     pso_data['current_clicked_point'] = None
                     
-                    if len(pso_data['objectives']) > 0:
-                        pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
-                        pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
-                    
-                    if (pso_data['parameters'] is not None and 
-                        len(pso_data['parameters']) > 0 and 
-                        pso_data['parameters'].shape[1] > 0):
-                        pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
-                        pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+                    # Update all derived data
+                    update_derived_data()
                     
                     log_activity("Reset data to original")
-                except Exception as e:
-                    log_activity(f"Error resetting data: {str(e)}")
+            except Exception as e:
+                log_activity(f"Error resetting data: {str(e)}")
             
         elif 'main-plot' in trigger and selected_data and selected_data.get('points'):
             try:
                 new_selection = set()
                 for point in selected_data['points']:
-                    if 'customdata' in point and isinstance(point['customdata'], int):
-                        idx = point['customdata']
+                    if 'customdata' in point:
+                        idx = int(point['customdata'])
                         if 0 <= idx < len(pso_data['objectives']):
                             new_selection.add(idx)
                 if new_selection != pso_data['selected_indices']:
                     pso_data['selected_indices'] = new_selection
                     log_activity(f"Selected {len(new_selection)} points via drag selection")
-            except Exception:
-                pass  # Ignore selection errors
+            except Exception as e:
+                log_activity(f"Error processing selection: {str(e)}")
 
-        # Validate target_id
+        # Validate and correct target_id
         current_data_length = len(displayed_objectives)
-        if target_id is None or target_id >= current_data_length or target_id < 0:
+        if not isinstance(target_id, (int, np.integer)) or target_id >= current_data_length or target_id < 0:
             target_id = 0
 
+        # Apply filters with comprehensive error handling
         current_objectives = displayed_objectives.copy()
         current_parameters = (pso_data['parameters'].copy() 
                             if pso_data['parameters'] is not None and len(pso_data['parameters']) > 0 
                             else None)
         
-        # Apply filters with proper error handling
         filter_mask = np.ones(len(current_objectives), dtype=bool)
         
         try:
-            # Parameter filters
+            # Apply parameter filters
             if (current_parameters is not None and 
                 param_slider_values and 
-                current_parameters.shape[1] > 0):
+                len(param_slider_values) == current_parameters.shape[1]):
                 
-                num_expected_param_sliders = current_parameters.shape[1]
-                if len(param_slider_values) == num_expected_param_sliders:
-                    for i, slider_range in enumerate(param_slider_values):
-                        if (i < current_parameters.shape[1] and 
-                            slider_range and len(slider_range) == 2):
-                            try:
-                                low, high = float(slider_range[0]), float(slider_range[1])
-                                if np.isfinite(low) and np.isfinite(high):
-                                    param_col = current_parameters[:, i]
-                                    filter_mask &= (param_col >= low) & (param_col <= high)
-                            except (ValueError, TypeError, IndexError):
-                                continue  # Skip this filter on error
-                else:
-                    log_activity(f"Parameter filter mismatch: {len(param_slider_values)} sliders vs {num_expected_param_sliders} parameters")
+                for i, slider_range in enumerate(param_slider_values):
+                    if (i < current_parameters.shape[1] and 
+                        isinstance(slider_range, list) and
+                        len(slider_range) == 2 and
+                        all(isinstance(x, (int, float)) and np.isfinite(x) for x in slider_range)):
+                        low, high = slider_range
+                        param_col = current_parameters[:, i]
+                        filter_mask &= (param_col >= low) & (param_col <= high)
             
-            # Objective filters
-            if (current_objectives is not None and 
-                obj_slider_values and 
-                current_objectives.shape[1] > 0):
+            # Apply objective filters
+            if (obj_slider_values and 
+                len(obj_slider_values) == current_objectives.shape[1]):
                 
-                num_expected_obj_sliders = current_objectives.shape[1]
-                if len(obj_slider_values) == num_expected_obj_sliders:
-                    for i, slider_range in enumerate(obj_slider_values):
-                        if (i < current_objectives.shape[1] and 
-                            slider_range and len(slider_range) == 2):
-                            try:
-                                low, high = float(slider_range[0]), float(slider_range[1])
-                                if np.isfinite(low) and np.isfinite(high):
-                                    obj_col = current_objectives[:, i]
-                                    filter_mask &= (obj_col >= low) & (obj_col <= high)
-                            except (ValueError, TypeError, IndexError):
-                                continue  # Skip this filter on error
-                else:
-                    log_activity(f"Objective filter mismatch: {len(obj_slider_values)} sliders vs {num_expected_obj_sliders} objectives")
-                    
+                for i, slider_range in enumerate(obj_slider_values):
+                    if (i < current_objectives.shape[1] and 
+                        isinstance(slider_range, list) and
+                        len(slider_range) == 2 and
+                        all(isinstance(x, (int, float)) and np.isfinite(x) for x in slider_range)):
+                        low, high = slider_range
+                        obj_col = current_objectives[:, i]
+                        filter_mask &= (obj_col >= low) & (obj_col <= high)
+                        
         except Exception as filter_error:
             filter_mask = np.ones(len(current_objectives), dtype=bool)
             log_activity(f"Filter error, using no filtering: {str(filter_error)}")
@@ -892,7 +936,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                 pso_data.get('pareto_objectives', np.array([])), 
                 target_id, 
                 pso_data['selected_indices'],
-                (pso_data['obj_mins'], pso_data['obj_maxs']) if 'obj_mins' in pso_data else None,
+                (pso_data['obj_mins'], pso_data['obj_maxs']) if pso_data.get('obj_mins') is not None else None,
                 filter_mask
             )
         except Exception as plot_error:
@@ -922,7 +966,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         except Exception:
             status_content = "Status update error"
 
-        # Create activity panel
+        # Create point information display
         try:
             activity_content = "No point information available"
             
@@ -931,6 +975,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
             display_type = "none"
             
             if (pso_data['current_clicked_point'] is not None and 
+                isinstance(pso_data['current_clicked_point'], (int, np.integer)) and
                 pso_data['current_clicked_point'] < len(current_objectives)):
                 display_point_id = pso_data['current_clicked_point']
                 display_type = "clicked"
@@ -946,34 +991,35 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
             if display_type == "multiple":
                 # Show summary statistics for multiple selected points
                 try:
-                    selected_indices_list = list(pso_data['selected_indices'])
-                    selected_objectives = current_objectives[selected_indices_list]
+                    selected_indices_list = [idx for idx in pso_data['selected_indices'] 
+                                           if isinstance(idx, (int, np.integer)) and 0 <= idx < len(current_objectives)]
                     
-                    num_selected = len(selected_indices_list)
-                    pareto_mask_selected = filter_pareto_front(current_objectives)[selected_indices_list]
-                    num_pareto_selected = np.sum(pareto_mask_selected)
-                    
-                    # Calculate ideal point (minimum values for each objective)
-                    ideal_point = np.min(current_objectives, axis=0)
-                    distances_to_ideal = []
-                    for idx in selected_indices_list:
-                        distance = np.sqrt(np.sum((current_objectives[idx] - ideal_point)**2))
-                        distances_to_ideal.append(distance)
-                    
-                    avg_distance = np.mean(distances_to_ideal)
-                    best_distance = np.min(distances_to_ideal)
-                    worst_distance = np.max(distances_to_ideal)
-                    
-                    activity_content = html.Div([
-                        html.P(f"{num_selected} Points Selected | {num_pareto_selected} Pareto Optimal", 
-                               style={'fontWeight': 'bold', 'color': 'darkblue'}),
-                        html.Hr(style={'margin': '5px 0'}),
-                        html.P("Distance to Ideal Point:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'}),
-                        html.P(f"Avg: {avg_distance:.4f} | Best: {best_distance:.4f} | Worst: {worst_distance:.4f}", 
-                               style={'fontSize': '11px', 'margin': '2px 0', 'color': 'darkgreen'})
-                    ])
-                except Exception:
-                    activity_content = f"Error displaying info for {len(pso_data['selected_indices'])} selected points"
+                    if selected_indices_list:
+                        num_selected = len(selected_indices_list)
+                        pareto_mask_selected = filter_pareto_front(current_objectives)[selected_indices_list]
+                        num_pareto_selected = np.sum(pareto_mask_selected)
+                        
+                        # Calculate ideal point (minimum values for each objective)
+                        ideal_point = np.min(current_objectives, axis=0)
+                        distances_to_ideal = []
+                        for idx in selected_indices_list:
+                            distance = np.sqrt(np.sum((current_objectives[idx] - ideal_point)**2))
+                            distances_to_ideal.append(distance)
+                        
+                        avg_distance = np.mean(distances_to_ideal)
+                        best_distance = np.min(distances_to_ideal)
+                        worst_distance = np.max(distances_to_ideal)
+                        
+                        activity_content = html.Div([
+                            html.P(f"{num_selected} Points Selected | {num_pareto_selected} Pareto Optimal", 
+                                   style={'fontWeight': 'bold', 'color': 'darkblue'}),
+                            html.Hr(style={'margin': '5px 0'}),
+                            html.P("Distance to Ideal Point:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'}),
+                            html.P(f"Avg: {avg_distance:.4f} | Best: {best_distance:.4f} | Worst: {worst_distance:.4f}", 
+                                   style={'fontSize': '11px', 'margin': '2px 0', 'color': 'darkgreen'})
+                        ])
+                except Exception as e:
+                    activity_content = f"Error displaying multiple selection: {str(e)}"
                     
             elif display_point_id is not None:
                 # Show detailed info for single point
@@ -1029,13 +1075,13 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                         html.P(f"Ideal Distance: {ideal_distance:.4f}", 
                                style={'fontSize': '11px', 'fontWeight': 'bold', 'color': 'black'})
                     ])
-                except Exception:
-                    activity_content = f"Error displaying info for point #{display_point_id}"
-                
+                except Exception as e:
+                    activity_content = f"Error displaying point info: {str(e)}"
+                    
         except Exception as activity_error:
             activity_content = f"Point information error: {str(activity_error)}"
 
-        # Create log content
+        # Create activity log
         try:
             log_content = []
             if 'activity_log' in pso_data and pso_data['activity_log']:
@@ -1044,84 +1090,29 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         except Exception:
             log_content = [html.Div("Log error")]
 
-        return fig, status_content, activity_content, log_content
+        # Create sliders (always refresh to reflect current state)
+        try:
+            sliders = create_sliders()
+        except Exception as e:
+            log_activity(f"Error creating sliders: {str(e)}")
+            sliders = [html.Div(f"Slider error: {str(e)}", style={'color': 'red'})]
+
+        return fig, status_content, activity_content, log_content, sliders, new_ui_state
 
     except Exception as e:
         error_fig = go.Figure()
-        error_fig.update_layout(title=f"Callback Error: {str(e)}")
+        error_fig.update_layout(title=f"Critical Error: {str(e)}")
         error_status = f"Error: {str(e)}"
         error_activity = f"Callback failed: {str(e)}"
         error_log = [html.Div(f"Critical error: {str(e)}")]
+        error_sliders = [html.Div("Sliders unavailable")]
         
         try:
             log_activity(f"Critical callback error: {str(e)}")
         except:
             pass
             
-        return error_fig, error_status, error_activity, error_log
-
-# Callback to update parameter mini plots when filters change
-@app.callback(
-    [Output({'type': 'param-mini-plot', 'index': ALL}, 'figure')],
-    [Input({'type': 'param-slider', 'index': ALL}, 'value'),
-     Input({'type': 'obj-slider', 'index': ALL}, 'value'),
-     Input('upload-data', 'contents'),
-     Input('delete-selected-btn', 'n_clicks'),
-     Input('keep-selected-btn', 'n_clicks'),
-     Input('reset-data-btn', 'n_clicks')],
-    prevent_initial_call=True
-)
-def update_parameter_mini_plots(param_slider_values, obj_slider_values, contents, 
-                               delete_clicks, keep_clicks, reset_clicks):
-    """Update parameter mini plots based on current filtering"""
-    try:
-        if (pso_data['parameters'] is None or 
-            len(pso_data['parameters']) == 0 or 
-            not pso_data.get('show_param_plots', True)):
-            return []
-        
-        # Calculate current filter mask
-        filter_mask = np.ones(len(pso_data['objectives']), dtype=bool)
-        
-        # Apply parameter filters
-        if (param_slider_values and 
-            len(param_slider_values) == pso_data['parameters'].shape[1]):
-            for i, slider_range in enumerate(param_slider_values):
-                if (slider_range and len(slider_range) == 2 and 
-                    all(np.isfinite(slider_range)) and
-                    i < pso_data['parameters'].shape[1]):
-                    try:
-                        low, high = float(slider_range[0]), float(slider_range[1])
-                        filter_mask &= (pso_data['parameters'][:, i] >= low) & (pso_data['parameters'][:, i] <= high)
-                    except (ValueError, TypeError):
-                        continue
-        
-        # Apply objective filters
-        if (obj_slider_values and 
-            len(obj_slider_values) == pso_data['objectives'].shape[1]):
-            for i, slider_range in enumerate(obj_slider_values):
-                if (slider_range and len(slider_range) == 2 and 
-                    all(np.isfinite(slider_range)) and
-                    i < pso_data['objectives'].shape[1]):
-                    try:
-                        low, high = float(slider_range[0]), float(slider_range[1])
-                        filter_mask &= (pso_data['objectives'][:, i] >= low) & (pso_data['objectives'][:, i] <= high)
-                    except (ValueError, TypeError):
-                        continue
-        
-        # Create updated mini plots
-        updated_figures = []
-        for i, param_name in enumerate(pso_data['param_names']):
-            if i < pso_data['parameters'].shape[1]:
-                fig = create_parameter_mini_plot(pso_data['parameters'], param_name, i, filter_mask)
-                updated_figures.append(fig)
-        
-        return updated_figures
-        
-    except Exception:
-        # Return empty figures on error - match the expected number
-        num_params = len(pso_data.get('param_names', []))
-        return [go.Figure() for _ in range(num_params)]
+        return error_fig, error_status, error_activity, error_log, error_sliders, (current_ui_state or {'slider_reset_trigger': 0, 'show_param_plots': True})
 
 @app.callback(
     Output('selection-store', 'data'),
@@ -1130,17 +1121,22 @@ def update_parameter_mini_plots(param_slider_values, obj_slider_values, contents
     prevent_initial_call=True
 )
 def update_selection_store(selected_data, current_data):
-    """Update selection store based on plot selection"""
+    """Update selection store with error handling"""
     try:
         if selected_data and selected_data.get('points'):
             selected_indices = []
             for point in selected_data['points']:
-                if 'customdata' in point and isinstance(point['customdata'], int):
-                    selected_indices.append(point['customdata'])
+                if 'customdata' in point:
+                    try:
+                        idx = int(point['customdata'])
+                        if isinstance(idx, (int, np.integer)):
+                            selected_indices.append(idx)
+                    except (ValueError, TypeError):
+                        continue
             return {'selected_indices': selected_indices}
-        return current_data if current_data else {'selected_indices': []}
+        return current_data or {'selected_indices': []}
     except Exception:
-        return {'selected_indices': []}
+        return current_data or {'selected_indices': []}
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080, debug=True)
