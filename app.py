@@ -141,6 +141,8 @@ def create_sliders():
         sliders.append(control_buttons)
 
         # Create a filter mask for current filtering state
+        # Note: The filter_mask here will be based on the last applied filters.
+        # This function primarily rebuilds the slider UI, the actual filtering happens in update_visualization.
         filter_mask = np.ones(len(pso_data['objectives']) if pso_data['objectives'] is not None else 0, dtype=bool)
 
         # Parameter sliders - use just the parameter name
@@ -189,10 +191,27 @@ def filter_pareto_front(points):
     is_pareto = np.ones(points.shape[0], dtype=bool)
     for i, c in enumerate(points):
         if is_pareto[i]:
-            is_dominated = np.all(points[is_pareto] <= c, axis=1) & np.any(points[is_pareto] < c, axis=1)
-            is_pareto[is_pareto] = ~is_dominated
-            is_pareto[i] = True
+            # is_dominated = np.all(points[is_pareto] <= c, axis=1) & np.any(points[is_pareto] < c, axis=1)
+            # Corrected Pareto filtering: A point A dominates B if all objectives of A are <= B AND at least one objective of A is < B.
+            # We want to find points that are *not* dominated by any other point.
+            # So, for each point 'c', check if any other point 'p' in the set dominates 'c'.
+            # A point 'p' dominates 'c' if (p <= c for all objectives) AND (p < c for at least one objective).
+            dominated_by_any_other = np.any(np.all(points <= c, axis=1) & np.any(points < c, axis=1), axis=0)
+            is_pareto[i] = not dominated_by_any_other # Mark as non-pareto if dominated
+
+    # Re-calculate as the original logic can be inefficient and sometimes incorrect for large sets
+    # This is a more robust N*M implementation (N points, M objectives)
+    is_pareto = np.ones(points.shape[0], dtype=bool)
+    for i in range(points.shape[0]):
+        for j in range(points.shape[0]):
+            if i == j:
+                continue
+            # Check if point j dominates point i
+            if np.all(points[j] <= points[i]) and np.any(points[j] < points[i]):
+                is_pareto[i] = False
+                break
     return is_pareto
+
 
 def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0, selected_indices=None, fixed_axis_ranges=None, filter_mask=None):
     """Create interactive scatter matrix with selection capabilities"""
@@ -292,7 +311,7 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
                         hovertemplate=(
                             f"<b>Point #%{{customdata}}</b><br>"
                             f"{obj_names[j]}: %{{x:.3f}}<br>"
-                            f"{obj_names[i]}: %{{y:.3f}}<br>"
+                            f"{obj_names[i]}: %{{y:.3f}}<br}"
                             "<extra></extra>"
                         ),
                         showlegend=False,
@@ -599,7 +618,6 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         if pso_data['objectives'] is None or len(pso_data['objectives']) == 0:
             empty_fig = go.Figure()
             empty_fig.update_layout(title="Upload a CSV file to begin")
-            # Corrected: Returning 4 items instead of 5
             return empty_fig, "No data loaded", "Upload CSV file", []
 
         ctx = callback_context
@@ -613,20 +631,33 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         if displayed_objectives is None or len(displayed_objectives) == 0:
             empty_fig = go.Figure()
             empty_fig.update_layout(title="No data available")
-            # Corrected: Returning 4 items instead of 5
             return empty_fig, "No data", "No data", []
 
-        valid_selected = {idx for idx in pso_data['selected_indices']
-                         if isinstance(idx, int) and 0 <= idx < len(displayed_objectives)}
-        pso_data['selected_indices'] = valid_selected
+        # --- SELECTION HANDLING LOGIC ---
+        # Prioritize drag selection: if drag occurs, clear single click state
+        if 'main-plot' in trigger and selected_data and selected_data.get('points'):
+            new_selection = set()
+            for point in selected_data['points']:
+                if 'customdata' in point and isinstance(point['customdata'], int):
+                    idx = point['customdata']
+                    if 0 <= idx < len(pso_data['objectives']):
+                        new_selection.add(idx)
+            if new_selection != pso_data['selected_indices']:
+                pso_data['selected_indices'] = new_selection
+                pso_data['current_clicked_point'] = None # Clear single clicked point on drag select
+                log_activity(f"Selected {len(new_selection)} points via drag selection")
 
-        # Handle click data to track which point was clicked
-        if ('main-plot' in trigger and click_data and click_data.get('points') and
-            not (selected_data and selected_data.get('points'))):
+        # Handle single click, ONLY if no drag selection happened in this trigger
+        elif ('main-plot' in trigger and click_data and click_data.get('points') and
+              not (selected_data and selected_data.get('points'))): # Ensure no drag selection
             clicked_point = click_data['points'][0]
             if 'customdata' in clicked_point and isinstance(clicked_point['customdata'], int):
                 point_id = clicked_point['customdata']
                 if 0 <= point_id < len(pso_data['objectives']):
+                    # Clear previous selection if it was a multi-selection
+                    if len(pso_data['selected_indices']) > 1:
+                        pso_data['selected_indices'] = set()
+                    
                     pso_data['current_clicked_point'] = point_id  # Store clicked point
                     if point_id in pso_data['selected_indices']:
                         pso_data['selected_indices'].remove(point_id)
@@ -634,6 +665,11 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                     else:
                         pso_data['selected_indices'].add(point_id)
                         log_activity(f"Selected point #{point_id}")
+        # --- END SELECTION HANDLING ---
+
+        valid_selected = {idx for idx in pso_data['selected_indices']
+                         if isinstance(idx, int) and 0 <= idx < len(displayed_objectives)}
+        pso_data['selected_indices'] = valid_selected
 
         # Handle button clicks
         if 'clear-selection-btn' in trigger and clear_clicks:
@@ -717,17 +753,18 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                     pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
 
                 log_activity("Reset data to original")
-
-        elif 'main-plot' in trigger and selected_data and selected_data.get('points'):
-            new_selection = set()
-            for point in selected_data['points']:
-                if 'customdata' in point and isinstance(point['customdata'], int):
-                    idx = point['customdata']
-                    if 0 <= idx < len(pso_data['objectives']):
-                        new_selection.add(idx)
-            if new_selection != pso_data['selected_indices']:
-                pso_data['selected_indices'] = new_selection
-                log_activity(f"Selected {len(new_selection)} points via drag selection")
+        
+        # This part is now handled by the general selection logic above
+        # elif 'main-plot' in trigger and selected_data and selected_data.get('points'):
+        #     new_selection = set()
+        #     for point in selected_data['points']:
+        #         if 'customdata' in point:
+        #             idx = point['customdata']
+        #             if 0 <= idx < len(pso_data['objectives']):
+        #                 new_selection.add(idx)
+        #     if new_selection != pso_data['selected_indices']:
+        #         pso_data['selected_indices'] = new_selection
+        #         log_activity(f"Selected {len(new_selection)} points via drag selection")
 
         current_data_length = len(displayed_objectives)
         if target_id is None or target_id >= current_data_length or target_id < 0:
@@ -813,16 +850,17 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         try:
             activity_content = "No point information available"
 
-            # Priority: clicked point > multiple selection > single selection > target
+            # Priority: multiple selection > clicked point > single selected > target
             display_point_id = None
             display_type = "none"
 
-            if (pso_data['current_clicked_point'] is not None and
-                pso_data['current_clicked_point'] < len(current_objectives)):
+            if len(pso_data['selected_indices']) > 1:
+                display_type = "multiple_selected"
+            elif (pso_data['current_clicked_point'] is not None and
+                  pso_data['current_clicked_point'] < len(current_objectives) and
+                  pso_data['current_clicked_point'] in pso_data['selected_indices']): # Only show clicked if still in selected
                 display_point_id = pso_data['current_clicked_point']
                 display_type = "clicked"
-            elif len(pso_data['selected_indices']) > 1:
-                display_type = "multiple"
             elif len(pso_data['selected_indices']) == 1:
                 display_point_id = list(pso_data['selected_indices'])[0]
                 display_type = "single_selected"
@@ -830,33 +868,43 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                 display_point_id = target_id
                 display_type = "target"
 
-            if display_type == "multiple":
-                # Show summary statistics for multiple selected points
+            if display_type == "multiple_selected": # Changed from 'multiple' to 'multiple_selected' for clarity
                 selected_indices_list = list(pso_data['selected_indices'])
                 selected_objectives = current_objectives[selected_indices_list]
 
                 num_selected = len(selected_indices_list)
-                pareto_mask_selected = filter_pareto_front(current_objectives)[selected_indices_list]
+                
+                # Calculate aggregated objective values
+                obj_names = pso_data.get('obj_names', [f'Obj_{i}' for i in range(selected_objectives.shape[1])])
+                obj_avg_display = [html.P("Average Objective Values:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'})]
+                for i, name in enumerate(obj_names):
+                    if selected_objectives.shape[0] > 0: # Avoid mean of empty slice
+                        avg_val = np.mean(selected_objectives[:, i])
+                        obj_avg_display.append(html.P(f"{name}: {avg_val:.4f}", style={'fontSize': '11px', 'margin': '2px 0'}))
+                
+                # Calculate aggregated parameter values (if available)
+                param_avg_display = html.Div()
+                if current_parameters is not None and len(current_parameters) > 0:
+                    selected_parameters = current_parameters[selected_indices_list]
+                    param_names = pso_data.get('param_names', [f'Param_{i}' for i in range(selected_parameters.shape[1])])
+                    
+                    param_avg_display_list = [html.P("Average Parameter Values:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'})]
+                    for i, name in enumerate(param_names):
+                        if selected_parameters.shape[0] > 0: # Avoid mean of empty slice
+                            avg_val = np.mean(selected_parameters[:, i])
+                            param_avg_display_list.append(html.P(f"{name}: {avg_val:.4f}", style={'fontSize': '11px', 'margin': '2px 0'}))
+                    param_avg_display = html.Div(param_avg_display_list)
+
+                # Calculate Pareto count within selected points
+                pareto_mask_selected = filter_pareto_front(selected_objectives)
                 num_pareto_selected = np.sum(pareto_mask_selected)
 
-                # Calculate ideal point (minimum values for each objective)
-                ideal_point = np.min(current_objectives, axis=0)
-                distances_to_ideal = []
-                for idx in selected_indices_list:
-                    distance = np.sqrt(np.sum((current_objectives[idx] - ideal_point)**2))
-                    distances_to_ideal.append(distance)
-
-                avg_distance = np.mean(distances_to_ideal)
-                best_distance = np.min(distances_to_ideal)
-                worst_distance = np.max(distances_to_ideal)
-
                 activity_content = html.Div([
-                    html.P(f"{num_selected} Points Selected | {num_pareto_selected} Pareto Optimal",
+                    html.P(f"{num_selected} Points Selected | {num_pareto_selected} Pareto Optimal (within selection)",
                            style={'fontWeight': 'bold', 'color': 'darkblue'}),
                     html.Hr(style={'margin': '5px 0'}),
-                    html.P("Distance to Ideal Point:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'}),
-                    html.P(f"Avg: {avg_distance:.4f} | Best: {best_distance:.4f} | Worst: {worst_distance:.4f}",
-                           style={'fontSize': '11px', 'margin': '2px 0', 'color': 'darkgreen'})
+                    html.Div(obj_avg_display),
+                    param_avg_display # This will be an empty Div if no params
                 ])
 
             elif display_point_id is not None:
