@@ -761,9 +761,9 @@ def update_selection_store(selected_data, current_data):
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080, debug=True)(f"Deselected point #{point_id}")
-                    else:
-                        pso_data['selected_indices'].add(point_id)
-                        log_activity(f"Selected point #{point_id}")
+else:
+    pso_data['selected_indices'].add(point_id)
+    log_activity(f"Selected point #{point_id}")
 
         # Handle button clicks
         if 'clear-selection-btn' in trigger and clear_clicks:
