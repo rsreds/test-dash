@@ -1,4 +1,3 @@
-#works perfectly with adjustments
 import base64
 import io
 import numpy as np
@@ -323,6 +322,7 @@ app.layout = dbc.Container([
                                 dbc.Button("Clear Selection", id='clear-selection-btn', color="warning", size='sm', style={'width': '100%'})
                             ], width=2),
                             dbc.Col([
+                                html.Label("Target Point:", style={'fontSize': '12px', 'marginBottom': '2px'}),
                                 dbc.InputGroup([
                                     dbc.Input(id='target-input', type='number', value=0, min=0, size='sm', placeholder="Target ID"),
                                 ])
@@ -827,7 +827,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                     obj_display,
                     param_display,
                     html.P(f"Ideal Distribution: {ideal_distance:.4f}", 
-                           style={'fontSize': '11px', 'fontWeight': 'bold', 'color': 'darkgreen'})
+                           style={'fontSize': '11px', 'fontWeight': 'bold', 'color': 'black'})
                 ])
                 
         except Exception as activity_error:
