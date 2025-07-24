@@ -323,8 +323,7 @@ app.layout = dbc.Container([
                                 dbc.Button("Clear Selection", id='clear-selection-btn', color="warning", size='sm', style={'width': '100%'})
                             ], width=2),
                             dbc.Col([
-                                html.Label("Target Point:", style={'fontSize': '12px', 'marginBottom': '2px', 'display': 'block'}),
-                                dbc.Input(id='target-input', type='number', value=0, min=0, size='sm', placeholder="Target ID")
+                                dbc.Input(id='target-input', type='number', value=0, min=0, size='sm', placeholder="Target Point")
                             ], width=2)
                         ]),
                         
