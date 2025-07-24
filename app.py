@@ -464,14 +464,12 @@ app.layout.children.append(dcc.Store(id='selection-store', data={'selected_indic
      Input('apply-obj-selection-btn', 'n_clicks'),
      Input('delete-selected-btn', 'n_clicks'),
      Input('keep-selected-btn', 'n_clicks'),
-     Input('reset-data-btn', 'n_clicks'),
-     Input('toggle-param-plots-btn', 'n_clicks'),
-     Input('reset-sliders-btn', 'n_clicks')],
+     Input('reset-data-btn', 'n_clicks')],
     [State('upload-data', 'filename'),
      State('num-objectives', 'value')],
     prevent_initial_call=False
 )
-def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, reset_clicks, toggle_plots_clicks, reset_sliders_clicks, filename, num_objectives_input):
+def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, reset_clicks, filename, num_objectives_input):
     if contents is None:
         return '', [], {'display': 'none'}, 0, 2
 
@@ -482,11 +480,7 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
         else:
             trigger = ctx.triggered[0]['prop_id'].split('.')[0]
 
-        if trigger in ['delete-selected-btn', 'keep-selected-btn', 'reset-data-btn', 'toggle-param-plots-btn']:
-            if trigger == 'toggle-param-plots-btn':
-                pso_data['show_param_plots'] = not pso_data.get('show_param_plots', True)
-                log_activity(f"Parameter plots {'shown' if pso_data['show_param_plots'] else 'hidden'}")
-            
+        if trigger in ['delete-selected-btn', 'keep-selected-btn', 'reset-data-btn']:
             if pso_data['objectives'] is not None:
                 sliders = create_sliders()
                 
@@ -592,14 +586,13 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
      Input('delete-selected-btn', 'n_clicks'),
      Input('keep-selected-btn', 'n_clicks'),
      Input('reset-data-btn', 'n_clicks'),
-     Input('apply-obj-selection-btn', 'n_clicks'),
-     Input('reset-sliders-btn', 'n_clicks')],  # Add reset sliders button
+     Input('apply-obj-selection-btn', 'n_clicks')],
     [State('selection-store', 'data')],
     prevent_initial_call=False
 )
 def update_visualization(contents, param_slider_values, obj_slider_values, target_id,
                         selection_store, selected_data, click_data, 
-                        clear_clicks, delete_clicks, keep_clicks, reset_clicks, obj_selection_clicks, reset_sliders_clicks,
+                        clear_clicks, delete_clicks, keep_clicks, reset_clicks, obj_selection_clicks,
                         current_selection_store):
     
     try:
@@ -624,12 +617,6 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         valid_selected = {idx for idx in pso_data['selected_indices'] 
                          if isinstance(idx, int) and 0 <= idx < len(displayed_objectives)}
         pso_data['selected_indices'] = valid_selected
-
-        # Handle reset sliders button
-        reset_sliders = False
-        if 'reset-sliders-btn' in trigger and reset_sliders_clicks:
-            reset_sliders = True
-            log_activity("Reset all sliders to default ranges")
 
         # Handle click data to track which point was clicked
         if ('main-plot' in trigger and click_data and click_data.get('points') and 
@@ -754,8 +741,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         try:
             if (current_parameters is not None and 
                 len(param_slider_values) > 0 and 
-                current_parameters.shape[1] > 0 and
-                not reset_sliders):  # Don't apply filters if resetting sliders
+                current_parameters.shape[1] > 0):
                 
                 if len(param_slider_values) == current_parameters.shape[1]:
                     for i, slider_range in enumerate(param_slider_values):
@@ -769,8 +755,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                     log_activity(f"Skipping parameter filters: {len(param_slider_values)} sliders vs {current_parameters.shape[1]} parameters")
             
             if (len(obj_slider_values) > 0 and 
-                current_objectives.shape[1] > 0 and
-                not reset_sliders):  # Don't apply filters if resetting sliders
+                current_objectives.shape[1] > 0):
                 
                 if len(obj_slider_values) == current_objectives.shape[1]:
                     for i, slider_range in enumerate(obj_slider_values):
@@ -936,12 +921,6 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                     log_content.append(html.Div(str(log_msg), style={'marginBottom': '2px'}))
         except Exception:
             log_content = [html.Div("Log error")]
-
-        # Update sliders with current filter mask for mini plots
-        try:
-            updated_sliders = create_sliders() if reset_sliders else create_sliders()
-        except Exception:
-            updated_sliders = []
 
         return fig, status_content, activity_content, log_content
 
