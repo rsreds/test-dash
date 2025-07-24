@@ -578,15 +578,18 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
     [Output('slider-container', 'children'),
      Output('ui-state-store', 'data')],
     [Input('upload-data', 'contents'),
-     Input('slider-values-store', 'data'),
-     Input('ui-state-store', 'data')],
+     Input('ui-state-store', 'data'),
+     Input('delete-selected-btn', 'n_clicks'),
+     Input('keep-selected-btn', 'n_clicks'),
+     Input('reset-data-btn', 'n_clicks')],
+    [State('slider-values-store', 'data')],
     prevent_initial_call=False
 )
-def update_sliders(contents, slider_values, ui_state):
+def update_sliders(contents, ui_state, delete_clicks, keep_clicks, reset_clicks, slider_values):
     """Create and update sliders based on current data"""
     try:
-        if pso_data['objectives'] is None or len(pso_data['objectives']) == 0:
-            return [html.Div("Upload a CSV file to see filters")], ui_state or {'show_param_plots': True, 'reset_trigger': 0}
+        if contents is None or pso_data['objectives'] is None or len(pso_data['objectives']) == 0:
+            return [html.Div("Upload a CSV file to see filters", className="text-muted text-center p-3")], ui_state or {'show_param_plots': True, 'reset_trigger': 0}
         
         # Validate data first
         if not validate_data_consistency():
@@ -618,7 +621,7 @@ def update_sliders(contents, slider_values, ui_state):
             
             sliders.append(html.H6("Parameter Filters:", className="mt-3 mb-2"))
             for i, name in enumerate(pso_data['param_names']):
-                if i < pso_data['parameters'].shape[1]:
+                if i < min(pso_data['parameters'].shape[1], 20):  # Limit to 20
                     try:
                         param_col = pso_data['parameters'][:, i]
                         param_min = float(np.min(param_col))
@@ -665,6 +668,63 @@ def update_sliders(contents, slider_values, ui_state):
         if (pso_data['objectives'] is not None and 
             len(pso_data['objectives']) > 0 and
             len(pso_data['obj_names']) > 0):
+            
+            sliders.append(html.H6("Objective Filters:", className="mt-3 mb-2"))
+            for i, name in enumerate(pso_data['obj_names']):
+                if i < min(pso_data['objectives'].shape[1], 20):  # Limit to 20
+                    try:
+                        obj_col = pso_data['objectives'][:, i]
+                        obj_min = float(np.min(obj_col))
+                        obj_max = float(np.max(obj_col))
+                        
+                        if np.isfinite(obj_min) and np.isfinite(obj_max) and obj_min < obj_max:
+                            # Get current slider value or default to full range
+                            slider_key = f"obj_{i}"
+                            default_value = [obj_min, obj_max]
+                            current_value = slider_values.get(slider_key, default_value) if slider_values else default_value
+                            
+                            slider_div = html.Div([
+                                html.P(f"Filter by {name}:", style={'marginBottom': '5px', 'marginTop': '15px', 'fontSize': '14px'}),
+                                dcc.RangeSlider(
+                                    id=f'obj-slider-{i}',
+                                    min=obj_min,
+                                    max=obj_max,
+                                    step=(obj_max - obj_min) / 100 if obj_max > obj_min else 0.01,
+                                    value=current_value,
+                                    marks={obj_min: f'{obj_min:.1f}', obj_max: f'{obj_max:.1f}'},
+                                    tooltip={"placement": "bottom", "always_visible": False},
+                                    updatemode='drag'
+                                )
+                            ], style={'marginBottom': '15px'})
+                            sliders.append(slider_div)
+                    except Exception as e:
+                        log_activity(f"Error creating objective slider {i}: {str(e)}")
+        
+        # Add a summary if sliders were created
+        if len(sliders) > 1:  # More than just control buttons
+            summary = html.Div([
+                html.Hr(),
+                html.P(f"Created {len(pso_data.get('param_names', []))} parameter and {len(pso_data.get('obj_names', []))} objective filters", 
+                       className="text-muted text-center", style={'fontSize': '12px'})
+            ])
+            sliders.append(summary)
+        else:
+            # No sliders created - show message
+            sliders.append(html.Div([
+                html.Hr(),
+                html.P("No filters available - check if CSV has valid numeric columns", 
+                       className="text-warning text-center")
+            ]))
+                        
+        return sliders, current_ui_state
+        
+    except Exception as e:
+        log_activity(f"Critical error creating sliders: {str(e)}")
+        error_sliders = [html.Div([
+            html.P(f"Error creating filters: {str(e)}", style={'color': 'red'}),
+            html.P("Please try reloading the CSV file", style={'color': 'orange'})
+        ])]
+        return error_sliders, ui_state or {'show_param_plots': True, 'reset_trigger': 0}
             
             sliders.append(html.H6("Objective Filters:", className="mt-3 mb-2"))
             for i, name in enumerate(pso_data['obj_names']):
@@ -737,16 +797,21 @@ def handle_ui_buttons(toggle_clicks, reset_clicks, current_state):
         log_activity(f"Error handling UI buttons: {str(e)}")
         return current_state or {'show_param_plots': True, 'reset_trigger': 0}
 
-# Callback 4: Update slider values store
+# Callback 4: Update slider values store (dynamic)
 @app.callback(
     Output('slider-values-store', 'data'),
-    [Input(f'param-slider-{i}', 'value') for i in range(50)] +  # Support up to 50 parameters
-    [Input(f'obj-slider-{i}', 'value') for i in range(50)],    # Support up to 50 objectives
+    [Input('upload-data', 'contents')] +
+    [Input(f'param-slider-{i}', 'value') for i in range(20)] +  # Support up to 20 parameters
+    [Input(f'obj-slider-{i}', 'value') for i in range(20)],    # Support up to 20 objectives
     prevent_initial_call=True
 )
-def update_slider_values(*slider_values):
+def update_slider_values(contents, *slider_values):
     """Update slider values in store"""
     try:
+        ctx = callback_context
+        if not ctx.triggered:
+            return {}
+            
         # Get which sliders actually exist
         param_count = len(pso_data.get('param_names', []))
         obj_count = len(pso_data.get('obj_names', []))
@@ -754,13 +819,13 @@ def update_slider_values(*slider_values):
         slider_data = {}
         
         # Process parameter sliders
-        for i in range(min(param_count, 50)):
-            if i < len(slider_values) and slider_values[i] is not None:
-                slider_data[f'param_{i}'] = slider_values[i]
+        for i in range(min(param_count, 20)):
+            if i + 1 < len(slider_values) and slider_values[i + 1] is not None:  # +1 to skip contents
+                slider_data[f'param_{i}'] = slider_values[i + 1]
         
         # Process objective sliders
-        for i in range(min(obj_count, 50)):
-            idx = 50 + i  # Offset by parameter count
+        for i in range(min(obj_count, 20)):
+            idx = 20 + i + 1  # Offset by parameter count + contents
             if idx < len(slider_values) and slider_values[idx] is not None:
                 slider_data[f'obj_{i}'] = slider_values[idx]
         
