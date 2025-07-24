@@ -189,19 +189,6 @@ def filter_pareto_front(points):
         return np.array([], dtype=bool)
 
     is_pareto = np.ones(points.shape[0], dtype=bool)
-    for i, c in enumerate(points):
-        if is_pareto[i]:
-            # is_dominated = np.all(points[is_pareto] <= c, axis=1) & np.any(points[is_pareto] < c, axis=1)
-            # Corrected Pareto filtering: A point A dominates B if all objectives of A are <= B AND at least one objective of A is < B.
-            # We want to find points that are *not* dominated by any other point.
-            # So, for each point 'c', check if any other point 'p' in the set dominates 'c'.
-            # A point 'p' dominates 'c' if (p <= c for all objectives) AND (p < c for at least one objective).
-            dominated_by_any_other = np.any(np.all(points <= c, axis=1) & np.any(points < c, axis=1), axis=0)
-            is_pareto[i] = not dominated_by_any_other # Mark as non-pareto if dominated
-
-    # Re-calculate as the original logic can be inefficient and sometimes incorrect for large sets
-    # This is a more robust N*M implementation (N points, M objectives)
-    is_pareto = np.ones(points.shape[0], dtype=bool)
     for i in range(points.shape[0]):
         for j in range(points.shape[0]):
             if i == j:
@@ -309,10 +296,10 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
                         ),
                         customdata=customdata,
                         hovertemplate=(
-                            f"<b>Point #%{{customdata}}</b><br>"
-                            f"{obj_names[j]}: %{{x:.3f}}<br>"
-                            f"{obj_names[i]}: %{{y:.3f}}<br}"
-                            "<extra></extra>"
+                            "<b>Point #%{customdata}</b><br>"
+                            + obj_names[j] + ": %{x:.3f}<br>"
+                            + obj_names[i] + ": %{y:.3f}<br>"
+                            + "<extra></extra>"
                         ),
                         showlegend=False,
                         selectedpoints=list(selected_indices) if selected_indices else None
@@ -754,18 +741,6 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
 
                 log_activity("Reset data to original")
         
-        # This part is now handled by the general selection logic above
-        # elif 'main-plot' in trigger and selected_data and selected_data.get('points'):
-        #     new_selection = set()
-        #     for point in selected_data['points']:
-        #         if 'customdata' in point:
-        #             idx = point['customdata']
-        #             if 0 <= idx < len(pso_data['objectives']):
-        #                 new_selection.add(idx)
-        #     if new_selection != pso_data['selected_indices']:
-        #         pso_data['selected_indices'] = new_selection
-        #         log_activity(f"Selected {len(new_selection)} points via drag selection")
-
         current_data_length = len(displayed_objectives)
         if target_id is None or target_id >= current_data_length or target_id < 0:
             target_id = 0
@@ -868,7 +843,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                 display_point_id = target_id
                 display_type = "target"
 
-            if display_type == "multiple_selected": # Changed from 'multiple' to 'multiple_selected' for clarity
+            if display_type == "multiple_selected":
                 selected_indices_list = list(pso_data['selected_indices'])
                 selected_objectives = current_objectives[selected_indices_list]
 
