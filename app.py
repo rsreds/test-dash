@@ -610,8 +610,10 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         ctx = callback_context
         if not ctx.triggered:
             trigger = 'upload-data'
+            triggered_id = None
         else:
             trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+            triggered_id = ctx.triggered[0]['prop_id'] # Get the full ID including property
 
         displayed_objectives, displayed_names = get_displayed_objectives()
 
@@ -621,8 +623,8 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
             return empty_fig, "No data", "No data", []
 
         # --- SELECTION HANDLING LOGIC ---
-        # Prioritize drag selection: if drag occurs, clear single click state
-        if 'main-plot' in trigger and selected_data and selected_data.get('points'):
+        # Handle drag selection first and give it priority
+        if triggered_id == 'main-plot.selectedData' and selected_data and selected_data.get('points'):
             new_selection = set()
             for point in selected_data['points']:
                 if 'customdata' in point and isinstance(point['customdata'], int):
@@ -631,27 +633,27 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                         new_selection.add(idx)
             if new_selection != pso_data['selected_indices']:
                 pso_data['selected_indices'] = new_selection
-                pso_data['current_clicked_point'] = None # Clear single clicked point on drag select
+                pso_data['current_clicked_point'] = None  # Clear single clicked point on drag select
                 log_activity(f"Selected {len(new_selection)} points via drag selection")
 
-        # Handle single click, ONLY if no drag selection happened in this trigger
-        elif ('main-plot' in trigger and click_data and click_data.get('points') and
-              not (selected_data and selected_data.get('points'))): # Ensure no drag selection
+        # Handle single click only if main-plot.clickData was the primary trigger
+        elif triggered_id == 'main-plot.clickData' and click_data and click_data.get('points'):
             clicked_point = click_data['points'][0]
             if 'customdata' in clicked_point and isinstance(clicked_point['customdata'], int):
                 point_id = clicked_point['customdata']
                 if 0 <= point_id < len(pso_data['objectives']):
-                    # Clear previous selection if it was a multi-selection
-                    if len(pso_data['selected_indices']) > 1:
-                        pso_data['selected_indices'] = set()
-                    
-                    pso_data['current_clicked_point'] = point_id  # Store clicked point
+                    # Toggle selection for the clicked point
                     if point_id in pso_data['selected_indices']:
                         pso_data['selected_indices'].remove(point_id)
                         log_activity(f"Deselected point #{point_id}")
                     else:
+                        # If a single click occurs and there's a multi-selection, clear it first
+                        if len(pso_data['selected_indices']) > 1:
+                            pso_data['selected_indices'] = set()
+                            log_activity("Cleared multi-selection on single click")
                         pso_data['selected_indices'].add(point_id)
                         log_activity(f"Selected point #{point_id}")
+                    pso_data['current_clicked_point'] = point_id  # Store clicked point
         # --- END SELECTION HANDLING ---
 
         valid_selected = {idx for idx in pso_data['selected_indices']
