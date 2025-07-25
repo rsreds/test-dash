@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from dash import Dash, html, dcc, Input, Output, State, ALL, callback_context
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from datetime import datetime
 
@@ -24,12 +25,15 @@ pso_data = {
     'filename': None,
     'obj_mins': None,
     'obj_maxs': None,
+    'lb': np.array([]),  # Initialize lb with an empty numpy array
+    'ub': np.array([]),  # Initialize ub with an empty numpy array
     'selected_indices': set(),
     'current_clicked_point': None,
     'activity_log': [],
     'displayed_objectives': None,
     'max_objectives': 0,
-    'show_param_plots': True
+    'original_df': None,  # Store original dataframe for restructuring
+    'original_parameters': None # Store original parameters for reset
 }
 
 def log_activity(message):
@@ -45,77 +49,38 @@ def get_displayed_objectives():
         return None, []
     return pso_data['objectives'], pso_data['obj_names']
 
-def create_parameter_mini_plot(param_data, param_name, param_index, filter_mask=None):
-    """Create a small scatter plot for parameter distribution"""
-    if param_data is None or len(param_data) == 0 or param_index >= param_data.shape[1]:
-        return go.Figure()
+def calculate_plot_height(num_objectives):
+    """Calculate dynamic plot height based on number of objectives"""
+    if num_objectives <= 0:
+        return 400  # Default minimum height
+    return num_objectives * 250  # 250px per objective
 
-    if filter_mask is None:
-        filter_mask = np.ones(len(param_data), dtype=bool)
+def create_slider(title, slider_id, min_val, max_val):
+    """Create slider"""
+    # Ensure a small range if min_val == max_val for the slider to be visible
+    epsilon = 1e-9 # A small number
+    if min_val == max_val:
+        min_val_display = min_val - epsilon
+        max_val_display = max_val + epsilon
+        marks_display = {min_val: f'{min_val:.1f}'} # Only show the single value
+    else:
+        min_val_display = min_val
+        max_val_display = max_val
+        marks_display = {min_val: f'{min_val:.1f}', max_val: f'{max_val:.1f}'}
 
-    param_values = param_data[:, param_index]
-
-    # Create y-values as just indices for scatter plot
-    y_values = np.arange(len(param_values))
-
-    # Color points based on filter
-    colors = ['blue' if mask else 'lightgray' for mask in filter_mask]
-    opacities = [0.8 if mask else 0.3 for mask in filter_mask]
-    sizes = [4 if mask else 2 for mask in filter_mask]
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=param_values,
-            y=y_values,
-            mode='markers',
-            marker=dict(
-                size=sizes,
-                color=colors,
-                opacity=opacities,
-                line=dict(width=0.5, color='gray')
-            ),
-            hovertemplate=f"<b>{param_name}</b><br>Value: %{{x:.4f}}<br>Point: %{{y}}<extra></extra>",
-            showlegend=False
-        )
-    )
-
-    fig.update_layout(
-        height=80,
-        margin=dict(l=10, r=10, t=5, b=20),
-        xaxis=dict(title="", tickfont=dict(size=8)),
-        yaxis=dict(showticklabels=False, showgrid=False),
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)'
-    )
-
-    return fig
-
-def create_slider(title, slider_id, min_val, max_val, param_index=None, show_plot=True, filter_mask=None):
-    """Create slider with optional mini parameter plot"""
     slider_div = html.Div([
         html.P(f"Filter by {title}:", style={'marginBottom': '5px', 'marginTop': '15px', 'fontSize': '14px'}),
         dcc.RangeSlider(
             id=slider_id,
-            min=min_val,
-            max=max_val,
-            step=(max_val - min_val) / 100 if max_val > min_val else 0.01,
-            value=[min_val, max_val],
-            marks={min_val: f'{min_val:.1f}', max_val: f'{max_val:.1f}'},
+            min=min_val_display,
+            max=max_val_display,
+            step=(max_val_display - min_val_display) / 100 if max_val_display > min_val_display else 0.01,
+            value=[min_val, max_val], # Still set value to actual min/max
+            marks=marks_display,
             tooltip={"placement": "bottom", "always_visible": False},
             updatemode='drag'
         )
     ], style={'marginBottom': '15px'})
-
-    # Add mini plot for parameters if requested
-    if param_index is not None and show_plot and pso_data['parameters'] is not None:
-        mini_plot = dcc.Graph(
-            id={'type': 'param-mini-plot', 'index': param_index},
-            figure=create_parameter_mini_plot(pso_data['parameters'], title, param_index, filter_mask),
-            style={'height': '80px', 'marginBottom': '5px'},
-            config={'displayModeBar': False}
-        )
-        return html.Div([mini_plot, slider_div])
 
     return slider_div
 
@@ -125,55 +90,48 @@ def create_sliders():
 
     try:
         # Add control buttons at the top
-        control_buttons = html.Div([
+        sliders.append(html.Div([
             dbc.Row([
-                dbc.Col([
-                    dbc.Button("Toggle Param Plots", id='toggle-param-plots-btn',
-                              color="info", size='sm', style={'width': '100%'})
-                ], width=6),
                 dbc.Col([
                     dbc.Button("Reset All Sliders", id='reset-sliders-btn',
                               color="secondary", size='sm', style={'width': '100%'})
-                ], width=6)
+                ], width=12)
             ], className="mb-3")
-        ])
-        sliders.append(control_buttons)
+        ]))
 
-        filter_mask = np.ones(len(pso_data['objectives']) if pso_data['objectives'] is not None else 0, dtype=bool)
-
-        # Parameter sliders
+        # Parameter sliders - use parameter bounds (lb/ub)
         if (pso_data['parameters'] is not None and
             len(pso_data['parameters']) > 0 and
             pso_data['parameters'].shape[1] > 0 and
             len(pso_data['param_names']) > 0):
 
             sliders.append(html.H6("Parameter Filters:", className="mt-3 mb-2"))
-            for i, name in enumerate(pso_data['param_names']):
-                if i < pso_data['parameters'].shape[1]:
-                    param_min = float(np.min(pso_data['parameters'][:, i]))
-                    param_max = float(np.max(pso_data['parameters'][:, i]))
-                    if param_min != param_max:
-                        sliders.append(create_slider(name,
-                                                   {'type': 'param-slider', 'index': i},
-                                                   param_min, param_max,
-                                                   param_index=i,
-                                                   show_plot=pso_data.get('show_param_plots', True),
-                                                   filter_mask=filter_mask))
+            
+            # Ensure lb/ub arrays exist and match parameter dimensions
+            if (pso_data['lb'] is None or len(pso_data['lb']) != pso_data['parameters'].shape[1] or
+                pso_data['ub'] is None or len(pso_data['ub']) != pso_data['parameters'].shape[1]):
+                # Recalculate lb/ub for current parameters
+                pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
+                pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+            
+            for i in range(pso_data['parameters'].shape[1]):
+                param_min = float(pso_data['lb'][i])
+                param_max = float(pso_data['ub'][i])
+                slider_label = f"parameter_{i}"
+                sliders.append(create_slider(slider_label, {'type': 'param-slider', 'index': i}, param_min, param_max))
 
-        # Objective sliders
+        # Objective sliders - use fitness values
         if (pso_data['objectives'] is not None and
             len(pso_data['objectives']) > 0 and
             len(pso_data['obj_names']) > 0):
 
             sliders.append(html.H6("Objective Filters:", className="mt-3 mb-2"))
-            for i, name in enumerate(pso_data['obj_names']):
-                if i < pso_data['objectives'].shape[1]:
-                    obj_min = float(np.min(pso_data['objectives'][:, i]))
-                    obj_max = float(np.max(pso_data['objectives'][:, i]))
-                    if obj_min != obj_max:
-                        sliders.append(create_slider(name,
-                                                   {'type': 'obj-slider', 'index': i},
-                                                   obj_min, obj_max))
+            for i in range(pso_data['objectives'].shape[1]):
+                obj_min = float(np.min(pso_data['objectives'][:, i]))
+                obj_max = float(np.max(pso_data['objectives'][:, i]))
+                slider_label = f"objective_{i}"
+                sliders.append(create_slider(slider_label, {'type': 'obj-slider', 'index': i}, obj_min, obj_max))
+                
     except Exception as e:
         sliders = [html.Div(f"Error creating sliders: {str(e)}", style={'color': 'red'})]
 
@@ -195,7 +153,6 @@ def filter_pareto_front(points):
                 break
     return is_pareto
 
-
 def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target_point_id=0, selected_indices=None, fixed_axis_ranges=None, filter_mask=None):
     """Create interactive scatter matrix with selection capabilities"""
     if selected_indices is None:
@@ -214,7 +171,8 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
     num_obj = displayed_objectives.shape[1]
     obj_names = displayed_names
 
-    if target_point_id >= len(displayed_objectives):
+    # Ensure target_point_id is within bounds
+    if target_point_id is None or target_point_id >= len(displayed_objectives) or target_point_id < 0:
         target_point_id = 0
 
     pareto_mask = filter_pareto_front(displayed_objectives)
@@ -259,7 +217,7 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
                         colors.append('lightgray')
                         sizes.append(3)
                         symbols.append('circle')
-                        opacities.append(0.2)  
+                        opacities.append(0.2)
                         continue
 
                     if idx in selected_indices:
@@ -303,41 +261,39 @@ def create_interactive_scatter_matrix(full_objectives, pareto_objectives, target
                     row=row, col=col
                 )
 
-                fig.update_xaxes(title_text=obj_names[j], title_font=dict(size=11), row=row, col=col)
-                fig.update_yaxes(title_text=obj_names[i], title_font=dict(size=11), row=row, col=col)
+                # Apply fixed axis ranges if provided
+                if fixed_axis_ranges and fixed_axis_ranges[0] is not None and fixed_axis_ranges[1] is not None:
+                    # Ensure the arrays have the correct dimensions for the current objective index
+                    if len(fixed_axis_ranges[0]) > j and len(fixed_axis_ranges[1]) > j:
+                        fig.update_xaxes(range=[fixed_axis_ranges[0][j], fixed_axis_ranges[1][j]],
+                                         title_text=obj_names[j], title_font=dict(size=11), row=row, col=col)
+                    else: # Fallback if index out of bounds
+                        fig.update_xaxes(title_text=obj_names[j], title_font=dict(size=11), row=row, col=col)
 
+                    if len(fixed_axis_ranges[0]) > i and len(fixed_axis_ranges[1]) > i:
+                        fig.update_yaxes(range=[fixed_axis_ranges[0][i], fixed_axis_ranges[1][i]],
+                                         title_text=obj_names[i], title_font=dict(size=11), row=row, col=col)
+                    else: # Fallback if index out of bounds
+                        fig.update_yaxes(title_text=obj_names[i], title_font=dict(size=11), row=row, col=col)
+                else:
+                    # Default auto-scaling if no fixed ranges
+                    fig.update_xaxes(title_text=obj_names[j], title_font=dict(size=11), row=row, col=col)
+                    fig.update_yaxes(title_text=obj_names[i], title_font=dict(size=11), row=row, col=col)
+
+    # Dynamic height calculation
+    dynamic_height = calculate_plot_height(num_obj)
+    
     fig.update_layout(
         title=dict(
             text=f'<b>{num_obj}×{num_obj} Interactive Multi-Objective Optimization Matrix</b>',
             font=dict(size=20, color='#2E4057'),
             x=0.5
         ),
-        height=num_obj * 250,
+        height=dynamic_height,  # Use dynamic height instead of fixed
         showlegend=False,
         dragmode='select',
         selectdirection='d',
         margin=dict(l=60, r=60, t=100, b=60)
-    )
-
-    legend_text = (
-        "<b>Legend:</b><br>"
-        "Blue: Pareto Optimal<br>"
-        "Light Blue: Regular<br>"
-        "Red: Selected<br>"
-        "Star: Target"
-    )
-
-    fig.add_annotation(
-        text=legend_text,
-        xref="paper", yref="paper",
-        x=1.02, y=1.0,
-        xanchor="left", yanchor="top",
-        showarrow=False,
-        bgcolor="rgba(255, 255, 255, 0.95)",
-        bordercolor="rgba(0, 0, 0, 0.2)",
-        borderwidth=1,
-        font=dict(size=10, color="#2E4057"),
-        align="left"
     )
 
     return fig
@@ -417,21 +373,25 @@ app.layout = dbc.Container([
             ], width=12)
         ], className="mb-4"),
 
-        dbc.Row([
-            dbc.Col([
-                dcc.Graph(id='main-plot', style={'height': '80vh'}, config={'displayModeBar': True})
-            ], width=9),
+        # Main content row with dynamic heights
+        html.Div(id='main-content-row', children=[
+            dbc.Row([
+                dbc.Col([
+                    dcc.Graph(id='main-plot', config={'displayModeBar': True})
+                ], width=9),
 
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("Filters", className="card-title"),
-                        html.Div(id='slider-container')
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H6("Filters", className="card-title"),
+                            html.Div(id='slider-container', style={'overflowY': 'scroll', 'padding': '10px', 'border': '1px solid lightgray', 'borderRadius': '5px'})
+                        ])
                     ])
-                ])
-            ], width=3)
+                ], width=3)
+            ], className="mb-4")
         ]),
 
+        # Bottom row for point info and activity log - properly spaced
         dbc.Row([
             dbc.Col([
                 dbc.Card([
@@ -461,7 +421,8 @@ app.layout.children.append(dcc.Store(id='selection-store', data={'selected_indic
      Output('slider-container', 'children'),
      Output('control-panels', 'style'),
      Output('target-input', 'max'),
-     Output('num-objectives', 'max')],
+     Output('num-objectives', 'max'),
+     Output('target-input', 'value')],
     [Input('upload-data', 'contents'),
      Input('apply-obj-selection-btn', 'n_clicks'),
      Input('delete-selected-btn', 'n_clicks'),
@@ -473,7 +434,7 @@ app.layout.children.append(dcc.Store(id='selection-store', data={'selected_indic
 )
 def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, reset_clicks, filename, num_objectives_input):
     if contents is None:
-        return '', [], {'display': 'none'}, 0, 2
+        return '', [], {'display': 'none'}, 0, 2, 0
 
     try:
         ctx = callback_context
@@ -482,10 +443,25 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
         else:
             trigger = ctx.triggered[0]['prop_id'].split('.')[0]
 
+        # Handle button clicks that modify data (but not structure changes)
         if trigger in ['delete-selected-btn', 'keep-selected-btn', 'reset-data-btn']:
             if pso_data['objectives'] is not None:
-                sliders = create_sliders()
+                # Recalculate obj_mins and obj_maxs based on the current data
+                if len(pso_data['objectives']) > 0:
+                    pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
+                    pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
+                else:
+                    pso_data['obj_mins'] = np.array([])
+                    pso_data['obj_maxs'] = np.array([])
 
+                if pso_data['parameters'] is not None and len(pso_data['parameters']) > 0 and pso_data['parameters'].shape[1] > 0:
+                    pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
+                    pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+                else:
+                    pso_data['lb'] = np.array([])
+                    pso_data['ub'] = np.array([])
+
+                sliders = create_sliders()
                 file_info = dbc.Alert([
                     html.H6(f"File: {pso_data['filename']}", className="alert-heading"),
                     html.P([
@@ -496,81 +472,145 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
                         f"Pareto Points: {np.sum(filter_pareto_front(pso_data['objectives'])) if len(pso_data['objectives']) > 0 else 0}"
                     ], className="mb-0")
                 ], color="success")
-
-                return file_info, sliders, {'display': 'block'}, len(pso_data['objectives']) - 1, len(pso_data['param_names']) + len(pso_data['obj_names'])
+                # Reset target-input to 0 after data modification, ensure max is not negative
+                return file_info, sliders, {'display': 'block'}, max(0, len(pso_data['objectives']) - 1), len(pso_data['param_names']) + len(pso_data['obj_names']), 0
             else:
-                return '', [], {'display': 'none'}, 0, 2
+                return '', [], {'display': 'none'}, 0, 2, 0
 
-        content_type, content_string = contents.split(',')
-        decoded = base64.b64decode(content_string)
-        df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+        # Handle file upload OR objective structure change
+        if trigger == 'upload-data' or trigger == 'apply-obj-selection-btn':
+            # For file upload, decode the CSV
+            if trigger == 'upload-data':
+                content_type, content_string = contents.split(',')
+                decoded = base64.b64decode(content_string)
+                df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+                pso_data['original_df'] = df.copy()  # Store original dataframe
+                pso_data['filename'] = filename
+            else:
+                # For structure change, use stored dataframe
+                if 'original_df' not in pso_data or pso_data['original_df'] is None:
+                    raise ValueError("No data loaded to restructure")
+                df = pso_data['original_df'].copy()
 
-        all_columns = df.columns.tolist()
-        total_columns = len(all_columns)
+            all_columns = df.columns.tolist()
+            total_columns = len(all_columns)
 
-        if num_objectives_input is None or num_objectives_input < 1:
-            num_objectives_input = min(2, total_columns)
+            if num_objectives_input is None or num_objectives_input < 1:
+                num_objectives_input = min(2, total_columns)
 
-        num_objectives = min(num_objectives_input, total_columns)
-        num_parameters = total_columns - num_objectives
+            num_objectives = min(num_objectives_input, total_columns)
+            num_parameters = total_columns - num_objectives
 
-        if num_parameters < 0:
-            raise ValueError(f"Cannot have {num_objectives} objectives with only {total_columns} columns")
+            if num_parameters < 0:
+                raise ValueError(f"Cannot have {num_objectives} objectives with only {total_columns} columns")
 
-        param_cols = all_columns[:num_parameters] if num_parameters > 0 else []
-        obj_cols = all_columns[num_parameters:num_parameters + num_objectives]
+            # Recalculate parameter and objective column assignments
+            param_cols = all_columns[:num_parameters] if num_parameters > 0 else []
+            obj_cols = all_columns[num_parameters:num_parameters + num_objectives]
 
-        param_data = df[param_cols].values if param_cols else np.array([]).reshape(len(df), 0)
-        obj_data = df[obj_cols].values
+            param_data = df[param_cols].values if param_cols else np.array([]).reshape(len(df), 0)
+            obj_data = df[obj_cols].values
 
-        pso_data['parameters'] = param_data
-        pso_data['objectives'] = obj_data
-        pso_data['original_objectives'] = obj_data.copy()
-        pso_data['original_parameters'] = param_data.copy() if len(param_data) > 0 else None
-        pso_data['param_names'] = param_cols
-        pso_data['obj_names'] = obj_cols
-        pso_data['filename'] = filename
-        pso_data['selected_indices'] = set()
-        pso_data['current_clicked_point'] = None
-        pso_data['activity_log'] = []
-        pso_data['max_objectives'] = total_columns
-        pso_data['displayed_objectives'] = list(range(num_objectives))
-        pso_data['show_param_plots'] = True 
+            # COMPLETELY RESET all PSO data with new structure
+            pso_data['parameters'] = param_data
+            pso_data['objectives'] = obj_data
+            pso_data['original_objectives'] = obj_data.copy()
+            pso_data['original_parameters'] = param_data.copy() if len(param_data) > 0 else None
+            pso_data['param_names'] = param_cols  # Updated parameter names
+            pso_data['obj_names'] = obj_cols      # Updated objective names
+            pso_data['selected_indices'] = set()
+            pso_data['current_clicked_point'] = None
+            pso_data['max_objectives'] = total_columns
+            pso_data['displayed_objectives'] = list(range(num_objectives))
 
-        if len(param_data) > 0 and param_data.shape[1] > 0:
-            pso_data['lb'] = np.min(param_data, axis=0)
-            pso_data['ub'] = np.max(param_data, axis=0)
-        else:
-            pso_data['lb'] = np.array([])
-            pso_data['ub'] = np.array([])
+            # Recalculate bounds and ranges for NEW structure
+            if len(param_data) > 0 and param_data.shape[1] > 0:
+                # Calculate PROPER parameter bounds (lb/ub) for each parameter column
+                pso_data['lb'] = np.min(param_data, axis=0)
+                pso_data['ub'] = np.max(param_data, axis=0)
+            else:
+                pso_data['lb'] = np.array([])
+                pso_data['ub'] = np.array([])
 
-        pso_data['obj_mins'] = np.min(obj_data, axis=0)
-        pso_data['obj_maxs'] = np.max(obj_data, axis=0)
+            # Calculate objective fitness ranges
+            if len(obj_data) > 0:
+                pso_data['obj_mins'] = np.min(obj_data, axis=0)
+                pso_data['obj_maxs'] = np.max(obj_data, axis=0)
+            else:
+                pso_data['obj_mins'] = np.array([])
+                pso_data['obj_maxs'] = np.array([])
 
-        pareto_mask = filter_pareto_front(obj_data)
-        pso_data['pareto_objectives'] = obj_data[pareto_mask]
-        pso_data['pareto_positions'] = param_data[pareto_mask] if len(param_data) > 0 else np.array([])
 
-        sliders = create_sliders()
+            # Recalculate Pareto front with NEW objectives
+            pareto_mask = filter_pareto_front(obj_data)
+            pso_data['pareto_objectives'] = obj_data[pareto_mask]
+            pso_data['pareto_positions'] = param_data[pareto_mask] if len(param_data) > 0 else np.array([])
 
-        file_info = dbc.Alert([
-            html.H6(f"File: {filename}", className="alert-heading"),
-            html.P([
-                f"Rows: {len(df)} | ",
-                f"Total Columns: {total_columns} | ",
-                f"Parameters: {len(param_cols)} | ",
-                f"Objectives: {len(obj_cols)} | ",
-                f"Pareto Points: {len(pso_data['pareto_objectives'])}"
-            ], className="mb-0")
-        ], color="success")
+            # Clear activity log for structure changes and reset selections
+            if trigger == 'apply-obj-selection-btn':
+                pso_data['activity_log'] = []
+                log_activity(f"Structure changed: {len(param_cols)} parameters ({param_cols}), {len(obj_cols)} objectives ({obj_cols})")
+            else:
+                pso_data['activity_log'] = []
+                log_activity(f"Loaded {filename}: {len(df)} points, {len(param_cols)} parameters, {len(obj_cols)} objectives")
 
-        log_activity(f"Loaded {filename}: {len(df)} points, {len(param_cols)} parameters, {len(obj_cols)} objectives")
+            # Create COMPLETELY NEW sliders with updated structure
+            sliders = create_sliders()
 
-        return file_info, sliders, {'display': 'block'}, len(obj_data) - 1, total_columns
+            file_info = dbc.Alert([
+                html.H6(f"File: {pso_data['filename']}", className="alert-heading"),
+                html.P([
+                    f"Rows: {len(df)} | ",
+                    f"Total Columns: {total_columns} | ",
+                    f"Parameters: {len(param_cols)} | ",
+                    f"Objectives: {len(obj_cols)} | ",
+                    f"Pareto Points: {len(pso_data['pareto_objectives'])}"
+                ], className="mb-0")
+            ], color="success")
+
+            return file_info, sliders, {'display': 'block'}, max(0, len(obj_data) - 1), total_columns, 0
 
     except Exception as e:
         error_msg = dbc.Alert(f"Error loading file: {str(e)}", color="danger")
-        return error_msg, [], {'display': 'none'}, 0, 2
+        return error_msg, [], {'display': 'none'}, 0, 2, 0
+
+# NEW CALLBACK: Update slider container height to match plot height
+@app.callback(
+    Output('slider-container', 'style'),
+    [Input('main-plot', 'figure')],
+    prevent_initial_call=True
+)
+def update_slider_height(figure):
+    """Update slider container height to match plot height"""
+    try:
+        if figure and 'layout' in figure and 'height' in figure['layout']:
+            plot_height = figure['layout']['height']
+            # Set slider container height to match plot height
+            return {
+                'height': f'{plot_height}px',
+                'overflowY': 'scroll', 
+                'padding': '10px', 
+                'border': '1px solid lightgray', 
+                'borderRadius': '5px'
+            }
+        else:
+            # Default height if no figure data
+            return {
+                'height': '400px',
+                'overflowY': 'scroll', 
+                'padding': '10px', 
+                'border': '1px solid lightgray', 
+                'borderRadius': '5px'
+            }
+    except Exception:
+        # Fallback to default height
+        return {
+            'height': '400px',
+            'overflowY': 'scroll', 
+            'padding': '10px', 
+            'border': '1px solid lightgray', 
+            'borderRadius': '5px'
+        }
 
 @app.callback(
     [Output('main-plot', 'figure'),
@@ -600,7 +640,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
     try:
         if pso_data['objectives'] is None or len(pso_data['objectives']) == 0:
             empty_fig = go.Figure()
-            empty_fig.update_layout(title="Upload a CSV file to begin")
+            empty_fig.update_layout(title="Upload a CSV file to begin", height=400)
             return empty_fig, "No data loaded", "Upload CSV file", []
 
         ctx = callback_context
@@ -609,13 +649,13 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
             triggered_id = None
         else:
             trigger = ctx.triggered[0]['prop_id'].split('.')[0]
-            triggered_id = ctx.triggered[0]['prop_id'] 
+            triggered_id = ctx.triggered[0]['prop_id']
 
         displayed_objectives, displayed_names = get_displayed_objectives()
 
         if displayed_objectives is None or len(displayed_objectives) == 0:
             empty_fig = go.Figure()
-            empty_fig.update_layout(title="No data available")
+            empty_fig.update_layout(title="No data available", height=400)
             return empty_fig, "No data", "No data", []
 
         if triggered_id == 'main-plot.selectedData' and selected_data and selected_data.get('points'):
@@ -646,7 +686,6 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                         pso_data['selected_indices'].add(point_id)
                         log_activity(f"Selected point #{point_id}")
                     pso_data['current_clicked_point'] = point_id
-        # --- END SELECTION HANDLING ---
 
         valid_selected = {idx for idx in pso_data['selected_indices']
                          if isinstance(idx, int) and 0 <= idx < len(displayed_objectives)}
@@ -677,12 +716,19 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                     if len(pso_data['objectives']) > 0:
                         pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
                         pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
+                    else:
+                        pso_data['obj_mins'] = np.array([])
+                        pso_data['obj_maxs'] = np.array([])
+
 
                     if (pso_data['parameters'] is not None and
                         len(pso_data['parameters']) > 0 and
                         pso_data['parameters'].shape[1] > 0):
                         pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
                         pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+                    else:
+                        pso_data['lb'] = np.array([])
+                        pso_data['ub'] = np.array([])
 
                     log_activity(f"Deleted {count} points, {len(pso_data['objectives'])} remaining")
                 else:
@@ -704,12 +750,18 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                     if len(pso_data['objectives']) > 0:
                         pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
                         pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
+                    else:
+                        pso_data['obj_mins'] = np.array([])
+                        pso_data['obj_maxs'] = np.array([])
 
                     if (pso_data['parameters'] is not None and
                         len(pso_data['parameters']) > 0 and
                         pso_data['parameters'].shape[1] > 0):
                         pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
                         pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+                    else:
+                        pso_data['lb'] = np.array([])
+                        pso_data['ub'] = np.array([])
 
                     log_activity(f"Kept only {len(valid_indices)} selected points")
                 else:
@@ -726,15 +778,21 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                 if len(pso_data['objectives']) > 0:
                     pso_data['obj_mins'] = np.min(pso_data['objectives'], axis=0)
                     pso_data['obj_maxs'] = np.max(pso_data['objectives'], axis=0)
+                else:
+                    pso_data['obj_mins'] = np.array([])
+                    pso_data['obj_maxs'] = np.array([])
 
                 if (pso_data['parameters'] is not None and
                     len(pso_data['parameters']) > 0 and
                     pso_data['parameters'].shape[1] > 0):
                     pso_data['lb'] = np.min(pso_data['parameters'], axis=0)
                     pso_data['ub'] = np.max(pso_data['parameters'], axis=0)
+                else:
+                    pso_data['lb'] = np.array([])
+                    pso_data['ub'] = np.array([])
 
                 log_activity("Reset data to original")
-        
+
         current_data_length = len(displayed_objectives)
         if target_id is None or target_id >= current_data_length or target_id < 0:
             target_id = 0
@@ -747,33 +805,32 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
         filter_mask = np.ones(len(current_objectives), dtype=bool)
 
         try:
+            # Only apply filters if the number of slider values matches the number of actual objectives/parameters
             if (current_parameters is not None and
-                len(param_slider_values) > 0 and
+                len(param_slider_values) == current_parameters.shape[1] and
                 current_parameters.shape[1] > 0):
-
-                if len(param_slider_values) == current_parameters.shape[1]:
-                    for i, slider_range in enumerate(param_slider_values):
-                        if (i < current_parameters.shape[1] and
-                            len(slider_range) == 2 and
-                            all(np.isfinite(slider_range))):
-                            low, high = slider_range
-                            if current_parameters[:, i].shape == filter_mask.shape:
-                                filter_mask &= (current_parameters[:, i] >= low) & (current_parameters[:, i] <= high)
-                else:
+                for i, slider_range in enumerate(param_slider_values):
+                    if (i < current_parameters.shape[1] and
+                        len(slider_range) == 2 and
+                        all(np.isfinite(slider_range))):
+                        low, high = slider_range
+                        if current_parameters[:, i].shape == filter_mask.shape:
+                            filter_mask &= (current_parameters[:, i] >= low) & (current_parameters[:, i] <= high)
+            else:
+                if current_parameters is not None and current_parameters.shape[1] > 0:
                     log_activity(f"Skipping parameter filters: {len(param_slider_values)} sliders vs {current_parameters.shape[1]} parameters")
 
-            if (len(obj_slider_values) > 0 and
+            if (len(obj_slider_values) == current_objectives.shape[1] and
                 current_objectives.shape[1] > 0):
-
-                if len(obj_slider_values) == current_objectives.shape[1]:
-                    for i, slider_range in enumerate(obj_slider_values):
-                        if (i < current_objectives.shape[1] and
-                            len(slider_range) == 2 and
-                            all(np.isfinite(slider_range))):
-                            low, high = slider_range
-                            if current_objectives[:, i].shape == filter_mask.shape:
-                                filter_mask &= (current_objectives[:, i] >= low) & (current_objectives[:, i] <= high)
-                else:
+                for i, slider_range in enumerate(obj_slider_values):
+                    if (i < current_objectives.shape[1] and
+                        len(slider_range) == 2 and
+                        all(np.isfinite(slider_range))):
+                        low, high = slider_range
+                        if current_objectives[:, i].shape == filter_mask.shape:
+                            filter_mask &= (current_objectives[:, i] >= low) & (current_objectives[:, i] <= high)
+            else:
+                if current_objectives.shape[1] > 0:
                     log_activity(f"Skipping objective filters: {len(obj_slider_values)} sliders vs {current_objectives.shape[1]} objectives")
 
         except Exception as filter_error:
@@ -786,12 +843,12 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                 pso_data.get('pareto_objectives', np.array([])),
                 target_id,
                 pso_data['selected_indices'],
-                (pso_data['obj_mins'], pso_data['obj_maxs']) if 'obj_mins' in pso_data else None,
+                (pso_data['obj_mins'], pso_data['obj_maxs']) if 'obj_mins' in pso_data and pso_data['obj_mins'].size > 0 else None,
                 filter_mask
             )
         except Exception as plot_error:
             fig = go.Figure()
-            fig.update_layout(title=f"Visualization Error: {str(plot_error)}")
+            fig.update_layout(title=f"Visualization Error: {str(plot_error)}", height=400)
             log_activity(f"Plot error: {str(plot_error)}")
 
         try:
@@ -827,7 +884,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                 display_type = "multiple_selected"
             elif (pso_data['current_clicked_point'] is not None and
                   pso_data['current_clicked_point'] < len(current_objectives) and
-                  pso_data['current_clicked_point'] in pso_data['selected_indices']): # Only show clicked if still in selected
+                  pso_data['current_clicked_point'] in pso_data['selected_indices']):
                 display_point_id = pso_data['current_clicked_point']
                 display_type = "clicked"
             elif len(pso_data['selected_indices']) == 1:
@@ -842,7 +899,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                 selected_objectives = current_objectives[selected_indices_list]
 
                 num_selected = len(selected_indices_list)
-                
+
                 # Calculate aggregated objective values
                 obj_names = pso_data.get('obj_names', [f'Obj_{i}' for i in range(selected_objectives.shape[1])])
                 obj_avg_display = [html.P("Average Objective Values:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'})]
@@ -850,13 +907,13 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                     if selected_objectives.shape[0] > 0:
                         avg_val = np.mean(selected_objectives[:, i])
                         obj_avg_display.append(html.P(f"{name}: {avg_val:.4f}", style={'fontSize': '11px', 'margin': '2px 0'}))
-                
-                # Calculate aggregated parameter values
+
+                # Calculate aggregated parameter values - display as separate lines like single point
                 param_avg_display = html.Div()
                 if current_parameters is not None and len(current_parameters) > 0:
                     selected_parameters = current_parameters[selected_indices_list]
                     param_names = pso_data.get('param_names', [f'Param_{i}' for i in range(selected_parameters.shape[1])])
-                    
+
                     param_avg_display_list = [html.P("Average Parameter Values:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'})]
                     for i, name in enumerate(param_names):
                         if selected_parameters.shape[0] > 0:
@@ -868,12 +925,41 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
                 pareto_mask_selected = filter_pareto_front(selected_objectives)
                 num_pareto_selected = np.sum(pareto_mask_selected)
 
+                # Calculate ideal distance for average point
+                ideal_point = np.min(current_objectives, axis=0)
+                avg_objectives = np.mean(selected_objectives, axis=0)
+                ideal_distance = np.sqrt(np.sum((avg_objectives - ideal_point)**2))
+
+                # Create objective values display (same format as single point)
+                obj_display = html.Div([
+                    html.P("Average Objective Values:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'}),
+                    html.P(" | ".join([f"{obj_names[i] if i < len(obj_names) else f'Obj_{i}'}: {avg_val:.4f}"
+                                     for i, avg_val in enumerate(avg_objectives)]),
+                           style={'fontSize': '11px', 'margin': '2px 0'})
+                ])
+
+                # Create parameter values display (same format as single point)
+                param_display = html.Div()
+                if current_parameters is not None and len(current_parameters) > 0:
+                    selected_parameters = current_parameters[selected_indices_list]
+                    param_names = pso_data.get('param_names', [f'Param_{i}' for i in range(selected_parameters.shape[1])])
+                    avg_parameters = np.mean(selected_parameters, axis=0)
+                    
+                    param_display = html.Div([
+                        html.P("Average Parameter Values:", style={'fontWeight': 'bold', 'fontSize': '12px', 'margin': '2px 0'}),
+                        html.P(" | ".join([f"{param_names[i] if i < len(param_names) else f'Param_{i}'}: {avg_val:.4f}"
+                                         for i, avg_val in enumerate(avg_parameters)]),
+                               style={'fontSize': '11px', 'margin': '2px 0'})
+                    ])
+
                 activity_content = html.Div([
                     html.P(f"{num_selected} Points Selected | {num_pareto_selected} Pareto Optimal (within selection)",
                            style={'fontWeight': 'bold', 'color': 'darkblue'}),
                     html.Hr(style={'margin': '5px 0'}),
-                    html.Div(obj_avg_display),
-                    param_avg_display
+                    obj_display,
+                    param_display,
+                    html.P(f"Ideal Distribution: {ideal_distance:.4f}",
+                           style={'fontSize': '11px', 'fontWeight': 'bold', 'color': 'black'})
                 ])
 
             elif display_point_id is not None:
@@ -945,7 +1031,7 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
 
     except Exception as e:
         error_fig = go.Figure()
-        error_fig.update_layout(title=f"Callback Error: {str(e)}")
+        error_fig.update_layout(title=f"Callback Error: {str(e)}", height=400)
         error_status = f"Error: {str(e)}"
         error_activity = f"Callback failed: {str(e)}"
         error_log = [html.Div(f"Critical error: {str(e)}")]
@@ -959,12 +1045,11 @@ def update_visualization(contents, param_slider_values, obj_slider_values, targe
 
 @app.callback(
     Output('slider-container', 'children', allow_duplicate=True),
-    [Input('reset-sliders-btn', 'n_clicks'),
-     Input('toggle-param-plots-btn', 'n_clicks')],
+    [Input('reset-sliders-btn', 'n_clicks')],
     prevent_initial_call=True
 )
-def update_sliders_on_reset(reset_clicks, toggle_clicks):
-    """Update sliders when reset button is clicked or plots are toggled"""
+def update_sliders_on_reset(reset_clicks):
+    """Update sliders when reset button is clicked"""
     try:
         ctx = callback_context
         if not ctx.triggered:
@@ -972,71 +1057,12 @@ def update_sliders_on_reset(reset_clicks, toggle_clicks):
 
         trigger = ctx.triggered[0]['prop_id'].split('.')[0]
 
-        if trigger == 'toggle-param-plots-btn':
-            pso_data['show_param_plots'] = not pso_data.get('show_param_plots', True)
-            log_activity(f"Parameter plots {'shown' if pso_data['show_param_plots'] else 'hidden'}")
-        elif trigger == 'reset-sliders-btn':
+        if trigger == 'reset-sliders-btn':
             log_activity("Reset all sliders to default ranges")
 
         return create_sliders()
     except Exception as e:
         return create_sliders()
-
-# Add callback to update parameter mini plots when filters change
-@app.callback(
-    [Output({'type': 'param-mini-plot', 'index': ALL}, 'figure')],
-    [Input({'type': 'param-slider', 'index': ALL}, 'value'),
-     Input({'type': 'obj-slider', 'index': ALL}, 'value'),
-     Input('upload-data', 'contents'),
-     Input('delete-selected-btn', 'n_clicks'),
-     Input('keep-selected-btn', 'n_clicks'),
-     Input('reset-data-btn', 'n_clicks')],
-    prevent_initial_call=True
-)
-def update_parameter_mini_plots(param_slider_values, obj_slider_values, contents,
-                               delete_clicks, keep_clicks, reset_clicks):
-    """Update parameter mini plots based on current filtering"""
-    if (pso_data['parameters'] is None or
-        len(pso_data['parameters']) == 0 or
-        not pso_data.get('show_param_plots', True)):
-        return [[]]
-
-    try:
-        # Calculate current filter mask
-        filter_mask = np.ones(len(pso_data['objectives']), dtype=bool)
-
-        # Apply parameter filters
-        if (param_slider_values and
-            len(param_slider_values) == pso_data['parameters'].shape[1]):
-            for i, slider_range in enumerate(param_slider_values):
-                if (len(slider_range) == 2 and
-                    all(np.isfinite(slider_range)) and
-                    i < pso_data['parameters'].shape[1]):
-                    low, high = slider_range
-                    filter_mask &= (pso_data['parameters'][:, i] >= low) & (pso_data['parameters'][:, i] <= high)
-
-        # Apply objective filters
-        if (obj_slider_values and
-            len(obj_slider_values) == pso_data['objectives'].shape[1]):
-            for i, slider_range in enumerate(obj_slider_values):
-                if (len(slider_range) == 2 and
-                    all(np.isfinite(slider_range)) and
-                    i < pso_data['objectives'].shape[1]):
-                    low, high = slider_range
-                    filter_mask &= (pso_data['objectives'][:, i] >= low) & (pso_data['objectives'][:, i] <= high)
-
-        # Create updated mini plots
-        updated_figures = []
-        for i, param_name in enumerate(pso_data['param_names']):
-            if i < pso_data['parameters'].shape[1]:
-                fig = create_parameter_mini_plot(pso_data['parameters'], param_name, i, filter_mask)
-                updated_figures.append(fig)
-
-        return [updated_figures]
-
-    except Exception as e:
-        # Return empty figures on error
-        return [[go.Figure() for _ in range(len(pso_data.get('param_names', [])))]]
 
 @app.callback(
     Output('selection-store', 'data'),
@@ -1053,4 +1079,4 @@ def update_selection_store(selected_data, current_data):
     return current_data
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(host="localhost", port=8080, debug=True)
