@@ -939,8 +939,7 @@ def update_selection_store(selected_data, current_data):
     return current_data
 
 if __name__ == '__main__':
-<<<<<<< HEAD
-    app.run(host="localhost", port=8080, debug=True) 1), len(pso_data['param_names']) + len(pso_data['obj_names']), 0
+    app.run(host="0.0.0.0", port=8080, debug=True) 1), len(pso_data['param_names']) + len(pso_data['obj_names']), 0
             else:
                 return '', [], {'display': 'none'}, 0, 2, 0
 
@@ -987,6 +986,3 @@ if __name__ == '__main__':
             ], color="success")
 
             return file_info, sliders, {'display': 'block'}, max(0, len(pso_data['objectives']) -
-=======
-    app.run(host="0.0.0.0", port=8080, debug=True)
->>>>>>> ef2ea61b77d43f5ad27ecc664b478092413f31df
