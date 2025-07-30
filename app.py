@@ -1,4 +1,3 @@
-#the new param/obj are calculated by their previous values.
 import base64
 import io
 import numpy as np
