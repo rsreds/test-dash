@@ -116,7 +116,11 @@ def create_sliders():
             for i in range(pso_data['parameters'].shape[1]):
                 param_min = float(pso_data['lb'][i]) if i < len(pso_data['lb']) else 0.0
                 param_max = float(pso_data['ub'][i]) if i < len(pso_data['ub']) else 1.0
-                slider_label = pso_data['param_names'][i] if i < len(pso_data['param_names']) else f"parameter_{i}"
+                # Use the actual parameter column name from param_names
+                if i < len(pso_data['param_names']):
+                    slider_label = str(pso_data['param_names'][i])
+                else:
+                    slider_label = f"parameter_{i}"
                 sliders.append(create_slider(slider_label, {'type': 'param-slider', 'index': i}, param_min, param_max))
 
         # Objective sliders
@@ -136,7 +140,11 @@ def create_sliders():
             for i in range(pso_data['objectives'].shape[1]):
                 obj_min = float(pso_data['obj_mins'][i]) if i < len(pso_data['obj_mins']) else 0.0
                 obj_max = float(pso_data['obj_maxs'][i]) if i < len(pso_data['obj_maxs']) else 1.0
-                slider_label = pso_data['obj_names'][i] if i < len(pso_data['obj_names']) else f"objective_{i}"
+                # Use the actual objective column name from obj_names
+                if i < len(pso_data['obj_names']):
+                    slider_label = str(pso_data['obj_names'][i])
+                else:
+                    slider_label = f"objective_{i}"
                 sliders.append(create_slider(slider_label, {'type': 'obj-slider', 'index': i}, obj_min, obj_max))
 
     except Exception as e:
@@ -526,22 +534,34 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
                 raise ValueError(f"Cannot have {num_objectives} objectives with only {total_columns} columns")
 
             param_cols = all_columns[:num_parameters] if num_parameters > 0 else []
-            obj_cols = all_columns[num_parameters:num_parameters + num_objectives]
+            # MODIFICATION START: Explicitly rename objective columns
+            obj_cols_raw = all_columns[num_parameters:num_parameters + num_objectives]
+            obj_cols = [f"objective_{i}" for i in range(len(obj_cols_raw))]
+            # MODIFICATION END
 
             param_data = df[param_cols].values if param_cols else np.array([]).reshape(len(df), 0)
-            obj_data = df[obj_cols].values
+            obj_data = df[obj_cols_raw].values # Use obj_cols_raw to get data from original df
 
-            # Update pso_data with new structure
+            # Update pso_data with new structure - keep original_df but clear stale references
+            original_df_backup = pso_data.get('original_df', None)
+            filename_backup = pso_data.get('filename', filename)
+            
             pso_data['parameters'] = param_data
             pso_data['objectives'] = obj_data
             pso_data['original_objectives'] = obj_data.copy()
             pso_data['original_parameters'] = param_data.copy() if len(param_data) > 0 else None
             pso_data['param_names'] = param_cols
-            pso_data['obj_names'] = obj_cols
+            pso_data['obj_names'] = obj_cols # Use the newly generated obj_cols
             pso_data['selected_indices'] = set()
             pso_data['current_clicked_point'] = None
             pso_data['max_objectives'] = total_columns
-            pso_data['displayed_objectives'] = list(range(num_objectives))
+            # pso_data['displayed_objectives'] = list(range(num_objectives)) # This line isn't doing what it implies
+            pso_data['filename'] = filename_backup
+            pso_data['original_df'] = original_df_backup
+            if trigger == 'apply-obj-selection-btn':
+                pso_data['activity_log'] = pso_data.get('activity_log', [])
+            else:
+                pso_data['activity_log'] = []
 
             # Recalculate bounds for the new structure
             if param_data is not None and param_data.size > 0 and param_data.shape[1] > 0:
@@ -565,12 +585,13 @@ def load_csv_and_process(contents, apply_clicks, delete_clicks, keep_clicks, res
 
             # Log activity
             if trigger == 'apply-obj-selection-btn':
-                pso_data['activity_log'] = []
                 log_activity(f"Structure changed: {len(param_cols)} parameters ({param_cols}), {len(obj_cols)} objectives ({obj_cols})")
+                log_activity(f"Updated param_names: {pso_data['param_names']}")
+                log_activity(f"Updated obj_names: {pso_data['obj_names']}")
             else:
-                pso_data['activity_log'] = []
                 log_activity(f"Loaded {filename}: {len(df)} points, {len(param_cols)} parameters, {len(obj_cols)} objectives")
 
+            # Force regenerate sliders with new structure
             sliders = create_sliders()
 
             file_info = dbc.Alert([
